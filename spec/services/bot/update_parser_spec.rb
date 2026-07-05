@@ -6,8 +6,9 @@ RSpec.describe Bot::UpdateParser do
       let(:update) do
         {
           message: {
+            message_id: 555,
             chat: { id: 123_456 },
-            from: { first_name: "Alice", language_code: "en" },
+            from: { id: 123_456, first_name: "Alice", language_code: "en" },
             text: "/ping"
           }
         }
@@ -32,6 +33,16 @@ RSpec.describe Bot::UpdateParser do
         result = described_class.parse(update)
         expect(result.callback_data).to be_nil
       end
+
+      it "returns from_id" do
+        result = described_class.parse(update)
+        expect(result.from_id).to eq(123_456)
+      end
+
+      it "returns message_id" do
+        result = described_class.parse(update)
+        expect(result.message_id).to eq(555)
+      end
     end
 
     context "with a callback_query hash" do
@@ -40,8 +51,8 @@ RSpec.describe Bot::UpdateParser do
           callback_query: {
             id: "42",
             data: "some_action",
-            from: { first_name: "Bob", language_code: "fr" },
-            message: { chat: { id: 789 } }
+            from: { id: 4242, first_name: "Bob", language_code: "fr" },
+            message: { message_id: 777, chat: { id: 789 } }
           }
         }
       end
@@ -59,6 +70,16 @@ RSpec.describe Bot::UpdateParser do
       it "has nil text" do
         result = described_class.parse(update)
         expect(result.text).to be_nil
+      end
+
+      it "returns from_id" do
+        result = described_class.parse(update)
+        expect(result.from_id).to eq(4242)
+      end
+
+      it "returns message_id from the nested message" do
+        result = described_class.parse(update)
+        expect(result.message_id).to eq(777)
       end
     end
 

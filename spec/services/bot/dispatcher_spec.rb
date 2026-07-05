@@ -7,11 +7,13 @@ RSpec.describe Bot::Dispatcher do
   def parsed_update(text:, chat_id: 111)
     Bot::UpdateParser::ParsedUpdate.new(
       chat_id: chat_id,
+      from_id: 111,
       first_name: "Tester",
       language_code: "en",
       text: text,
       callback_data: nil,
-      callback_query_id: nil
+      callback_query_id: nil,
+      message_id: nil
     )
   end
 
