@@ -116,5 +116,64 @@ RSpec.describe DeliverQuoteJob, type: :job do
         expect(QuoteScheduler).not_to have_received(:schedule_for)
       end
     end
+
+    context "when Telegram returns a transient Error (non-403)" do
+      before do
+        schedule.update!(pending_job_id: "test-job-id")
+        allow(client).to receive(:send_message).and_raise(TelegramClient::Error, "timeout")
+      end
+
+      it "does NOT reschedule on first failure (retry_on intercepts for retry)" do
+        allow_any_instance_of(described_class).to receive(:job_id).and_return("test-job-id")
+        # retry_on catches TelegramClient::Error and re-enqueues — perform_now doesn't raise to caller
+        described_class.perform_now(schedule.id, date_str)
+        expect(QuoteScheduler).not_to have_received(:schedule_for)
+      end
+
+      it "does NOT mark user inactive (non-Forbidden errors are transient)" do
+        allow_any_instance_of(described_class).to receive(:job_id).and_return("test-job-id")
+        described_class.perform_now(schedule.id, date_str)
+        expect(user.reload.active).to be true
+      end
+    end
+
+    context "streak tracking" do
+      before { schedule.update!(pending_job_id: "test-job-id") }
+
+      it "sets streak to 1 on first delivery (no previous streak)" do
+        allow_any_instance_of(described_class).to receive(:job_id).and_return("test-job-id")
+        travel_to Time.zone.parse("2024-06-15 09:00:00 UTC") do
+          described_class.perform_now(schedule.id, date_str)
+        end
+        expect(user.reload.streak_count).to eq(1)
+      end
+
+      it "increments streak when delivering on the next consecutive day" do
+        user.update!(streak_count: 3, streak_last_date: Date.parse("2024-06-14"))
+        allow_any_instance_of(described_class).to receive(:job_id).and_return("test-job-id")
+        travel_to Time.zone.parse("2024-06-15 09:00:00 UTC") do
+          described_class.perform_now(schedule.id, date_str)
+        end
+        expect(user.reload.streak_count).to eq(4)
+      end
+
+      it "does not change streak when delivering twice on the same day" do
+        user.update!(streak_count: 3, streak_last_date: Date.parse("2024-06-15"))
+        allow_any_instance_of(described_class).to receive(:job_id).and_return("test-job-id")
+        travel_to Time.zone.parse("2024-06-15 09:00:00 UTC") do
+          described_class.perform_now(schedule.id, date_str)
+        end
+        expect(user.reload.streak_count).to eq(3)
+      end
+
+      it "resets streak to 1 when a day is missed" do
+        user.update!(streak_count: 5, streak_last_date: Date.parse("2024-06-10"))
+        allow_any_instance_of(described_class).to receive(:job_id).and_return("test-job-id")
+        travel_to Time.zone.parse("2024-06-15 09:00:00 UTC") do
+          described_class.perform_now(schedule.id, date_str)
+        end
+        expect(user.reload.streak_count).to eq(1)
+      end
+    end
   end
 end

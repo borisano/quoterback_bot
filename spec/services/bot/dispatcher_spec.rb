@@ -374,10 +374,10 @@ RSpec.describe Bot::Dispatcher do
         expect(user.reload.timezone).to be_nil
       end
 
-      it "shows the timezone picker" do
+      it "re-shows the timezone picker with an inline keyboard (not a bare text dead-end)" do
         dispatcher.dispatch(parsed_update(text: "/settimezone notazone"))
         expect(client).to have_received(:send_message).with(
-          hash_including(text: a_string_including("timezone"))
+          hash_including(reply_markup: hash_including(:inline_keyboard))
         )
       end
     end

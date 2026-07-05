@@ -62,7 +62,7 @@ module Bot
         London
         Paris
         Moscow
-        Dubai
+        Abu\ Dhabi
         Bangkok
         Tokyo
         Sydney

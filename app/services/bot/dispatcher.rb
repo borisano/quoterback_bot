@@ -559,9 +559,11 @@ module Bot
     def apply_timezone(update, user, tz_input)
       tz = Bot::TimezoneParser.parse(tz_input)
       if tz.nil?
+        # Re-show the picker with an error message — never a bare text dead-end
+        show_timezone_picker(update, user)
         client.send_message(
           chat_id: update.chat_id,
-          text: "❓ Couldn't recognize that timezone. Try a city name, IANA zone (e.g. Europe/London), or offset like +9.\n\nUse /settimezone to see the list."
+          text: "❓ Couldn't recognize \"#{tz_input.truncate(40)}\". Try a city name, IANA zone (e.g. Europe/London), or offset like +9."
         )
         return
       end
