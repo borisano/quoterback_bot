@@ -71,6 +71,13 @@ RSpec.describe Bot::Dispatcher do
           dispatcher.dispatch(parsed_update(text: "ping me in a min"))
         }.to have_enqueued_job(PingJob).with(111, 1)
       end
+
+      it "does NOT also trigger confirm-on-text" do
+        dispatcher.dispatch(parsed_update(text: "ping me in 1 minute"))
+        expect(client).not_to have_received(:send_message).with(
+          hash_including(text: a_string_including("Add this as a quote"))
+        )
+      end
     end
 
     context "with /add command" do
@@ -122,6 +129,13 @@ RSpec.describe Bot::Dispatcher do
         dispatcher.dispatch(parsed_update(text: "Live and let live."))
         expect(client).to have_received(:send_message).with(
           hash_including(chat_id: 111, text: a_string_including("✅"))
+        )
+      end
+
+      it "does NOT trigger confirm-on-text" do
+        dispatcher.dispatch(parsed_update(text: "Some plain text"))
+        expect(client).not_to have_received(:send_message).with(
+          hash_including(text: a_string_including("Add this as a quote"))
         )
       end
     end

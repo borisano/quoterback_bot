@@ -45,7 +45,9 @@ module Bot
       when "/settings"            then handle_settings(update, user)
       when "/help"                then handle_help(update, user)
       else
-        handle_schedule_ping(update) if text.match?(/ping me in/i)
+        if text.match?(/ping me in/i)
+          return handle_schedule_ping(update)
+        end
         handle_confirm_on_text(update, user, text) unless text.start_with?("/")
       end
     end
@@ -55,8 +57,10 @@ module Bot
 
       case data
       when /\Aob:tz\z/
+        client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
         client.send_message(chat_id: update.chat_id, text: "🌍 Timezone setup coming soon! For now use /settimezone")
       when /\Aob:help\z/
+        client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
         handle_help(update, user)
       when /\Aqc:yes:(.+)\z/
         handle_quote_confirm_yes(update, user, $1)
@@ -65,8 +69,10 @@ module Bot
       when /\Aq:rand:(\d+)\z/
         handle_quote_random_callback(update, user)
       when /\Aq:show:(\d+)\z/
+        client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
         handle_quote_show(update, user, $1.to_i)
       when /\Aq:del:(\d+)\z/
+        client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
         handle_delete_confirm_callback(update, user, $1.to_i)
       when /\Aq:dely:(\d+)\z/
         handle_quote_delete_yes(update, user, $1.to_i)
@@ -74,8 +80,13 @@ module Bot
         handle_quote_delete_no(update, user, $1.to_i)
       when /\Alist:pg:(\d+)\z/
         handle_list_page_callback(update, user, $1.to_i)
+      when /\Alist:noop\z/
+        client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
       when /\Aset:(.+)\z/
         client.answer_callback_query(callback_query_id: update.callback_query_id, text: "🚧 Coming soon!")
+      else
+        Rails.logger.debug("[Bot::Dispatcher] unhandled callback: #{data.inspect}")
+        client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
       end
     end
 
@@ -207,10 +218,7 @@ module Bot
         text: presenter.message_text,
         reply_markup: {
           inline_keyboard: [ [
-            { text: "🏷 Tag", callback_data: "q:tag:#{quote.id}" },
-            { text: "❤️ Fav", callback_data: "fav:toggle:#{quote.id}" },
-            { text: "🗑", callback_data: "q:del:#{quote.id}" }
-          ], [
+            { text: "🗑 Delete", callback_data: "q:del:#{quote.id}" },
             { text: "🎲 Another", callback_data: "q:rand:0" }
           ] ]
         }
@@ -227,8 +235,13 @@ module Bot
 
     def handle_quote_random_callback(update, user)
       quote = Quote.random_for(user)
-      return unless quote
 
+      if quote.nil?
+        client.answer_callback_query(callback_query_id: update.callback_query_id, text: "No quotes yet!")
+        return
+      end
+
+      client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
       presenter = Bot::QuotePresenter.new(quote)
       client.edit_message_text(
         chat_id: update.chat_id,
@@ -236,10 +249,7 @@ module Bot
         text: presenter.message_text,
         reply_markup: {
           inline_keyboard: [ [
-            { text: "🏷 Tag", callback_data: "q:tag:#{quote.id}" },
-            { text: "❤️ Fav", callback_data: "fav:toggle:#{quote.id}" },
-            { text: "🗑", callback_data: "q:del:#{quote.id}" }
-          ], [
+            { text: "🗑 Delete", callback_data: "q:del:#{quote.id}" },
             { text: "🎲 Another", callback_data: "q:rand:0" }
           ] ]
         }
@@ -265,9 +275,7 @@ module Bot
         text: presenter.message_text,
         reply_markup: {
           inline_keyboard: [ [
-            { text: "🏷 Tag", callback_data: "q:tag:#{quote.id}" },
-            { text: "❤️ Fav", callback_data: "fav:toggle:#{quote.id}" },
-            { text: "🗑", callback_data: "q:del:#{quote.id}" }
+            { text: "🗑 Delete", callback_data: "q:del:#{quote.id}" }
           ], [
             { text: "🔙 Back to list", callback_data: "list:pg:1" }
           ] ]
@@ -307,7 +315,7 @@ module Bot
 
       nav = []
       nav << { text: "⬅️", callback_data: "list:pg:#{page - 1}" } if page > 1
-      nav << { text: "#{page}/#{total_pages}", callback_data: "list:pg:#{page}" }
+      nav << { text: "#{page}/#{total_pages}", callback_data: "list:noop" }
       nav << { text: "➡️", callback_data: "list:pg:#{page + 1}" } if page < total_pages
 
       keyboard = [ number_buttons, nav, [ { text: "🎲 Random", callback_data: "q:rand:0" } ] ]
@@ -320,6 +328,8 @@ module Bot
     end
 
     def handle_list_page_callback(update, user, page)
+      client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
+
       quotes = user.quotes.order(created_at: :asc)
       total = quotes.count
       return if total == 0
@@ -343,7 +353,7 @@ module Bot
 
       nav = []
       nav << { text: "⬅️", callback_data: "list:pg:#{page - 1}" } if page > 1
-      nav << { text: "#{page}/#{total_pages}", callback_data: "list:pg:#{page}" }
+      nav << { text: "#{page}/#{total_pages}", callback_data: "list:noop" }
       nav << { text: "➡️", callback_data: "list:pg:#{page + 1}" } if page < total_pages
 
       keyboard = [ number_buttons, nav, [ { text: "🎲 Random", callback_data: "q:rand:0" } ] ]
@@ -408,6 +418,7 @@ module Bot
     def handle_quote_delete_yes(update, user, quote_id)
       quote = user.quotes.find_by(id: quote_id)
       quote&.destroy
+      client.answer_callback_query(callback_query_id: update.callback_query_id, text: "🗑 Deleted")
       client.edit_message_text(
         chat_id: update.chat_id,
         message_id: update.message_id,
@@ -416,6 +427,7 @@ module Bot
     end
 
     def handle_quote_delete_no(update, user, quote_id)
+      client.answer_callback_query(callback_query_id: update.callback_query_id, text: "👍 Kept")
       client.edit_message_text(
         chat_id: update.chat_id,
         message_id: update.message_id,
