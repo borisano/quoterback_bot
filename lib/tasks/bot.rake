@@ -8,6 +8,7 @@ namespace :bot do
 
   desc "Register the webhook URL with Telegram (production). Set WEBHOOK_URL and optionally TELEGRAM_WEBHOOK_SECRET."
   task set_webhook: :environment do
+    require "telegram/bot"
     token  = ENV.fetch("TELEGRAM_BOT_TOKEN")
     url    = ENV.fetch("WEBHOOK_URL") { abort "Set WEBHOOK_URL=https://yourhost.com/telegram/webhook" }
     secret = ENV["TELEGRAM_WEBHOOK_SECRET"]
@@ -17,7 +18,8 @@ namespace :bot do
     params[:secret_token] = secret if secret.present?
 
     result = client.api.set_webhook(**params)
-    if result["ok"]
+    ok = result.respond_to?(:ok) ? result.ok : result == true
+    if ok
       puts "✅ Webhook registered: #{url}"
     else
       puts "❌ Failed: #{result.inspect}"
@@ -26,14 +28,17 @@ namespace :bot do
 
   desc "Delete the currently registered webhook (reverts to long-polling)"
   task delete_webhook: :environment do
+    require "telegram/bot"
     token  = ENV.fetch("TELEGRAM_BOT_TOKEN")
     client = Telegram::Bot::Client.new(token)
     result = client.api.delete_webhook
-    puts result["ok"] ? "✅ Webhook deleted." : "❌ Failed: #{result.inspect}"
+    ok = result.respond_to?(:ok) ? result.ok : result == true
+    puts ok ? "✅ Webhook deleted." : "❌ Failed: #{result.inspect}"
   end
 
   desc "Register bot commands with Telegram (native command menu)"
   task set_commands: :environment do
+    require "telegram/bot"
     token  = ENV.fetch("TELEGRAM_BOT_TOKEN")
     client = Telegram::Bot::Client.new(token)
     result = client.api.set_my_commands(
@@ -50,7 +55,8 @@ namespace :bot do
         { command: "settimezone", description: "Set your timezone" }
       ].to_json
     )
-    puts result["ok"] ? "✅ Commands registered." : "❌ Failed: #{result.inspect}"
+    ok = result.respond_to?(:ok) ? result.ok : result == true
+    puts ok ? "✅ Commands registered." : "❌ Failed: #{result.inspect}"
   end
 
   desc "Manually send a ping to a user (usage: rails 'bot:ping_now[chat_id]')"
