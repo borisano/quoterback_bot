@@ -343,4 +343,171 @@ RSpec.describe Bot::Dispatcher do
       end
     end
   end
+
+  # ── /settimezone ────────────────────────────────────────────────────────────
+
+  context "with /settimezone command" do
+    context "with a valid timezone" do
+      it "sets the user's timezone" do
+        dispatcher.dispatch(parsed_update(text: "/settimezone London"))
+        expect(user.reload.timezone).to eq("Europe/London")
+      end
+
+      it "sends a confirmation message" do
+        dispatcher.dispatch(parsed_update(text: "/settimezone London"))
+        expect(client).to have_received(:send_message).with(
+          hash_including(chat_id: 111, text: a_string_including("Timezone set"))
+        )
+      end
+    end
+
+    context "with a UTC offset" do
+      it "resolves to a named timezone" do
+        dispatcher.dispatch(parsed_update(text: "/settimezone +9"))
+        expect(user.reload.timezone).not_to be_nil
+      end
+    end
+
+    context "with an invalid timezone" do
+      it "does not set the timezone" do
+        dispatcher.dispatch(parsed_update(text: "/settimezone notazone"))
+        expect(user.reload.timezone).to be_nil
+      end
+
+      it "shows the timezone picker" do
+        dispatcher.dispatch(parsed_update(text: "/settimezone notazone"))
+        expect(client).to have_received(:send_message).with(
+          hash_including(text: a_string_including("timezone"))
+        )
+      end
+    end
+
+    context "bare /settimezone" do
+      it "shows the common-zone picker" do
+        dispatcher.dispatch(parsed_update(text: "/settimezone"))
+        expect(client).to have_received(:send_message).with(
+          hash_including(text: a_string_including("timezone"))
+        )
+      end
+    end
+  end
+
+  context "when user is in awaiting_timezone state" do
+    before { user.update!(state: "awaiting_timezone") }
+
+    it "accepts a typed timezone and sets it" do
+      dispatcher.dispatch(parsed_update(text: "London"))
+      expect(user.reload.timezone).to eq("Europe/London")
+    end
+
+    it "clears the state after setting timezone" do
+      dispatcher.dispatch(parsed_update(text: "London"))
+      expect(user.reload.state).to be_nil
+    end
+
+    it "does NOT trigger confirm-on-text" do
+      dispatcher.dispatch(parsed_update(text: "London"))
+      expect(client).not_to have_received(:send_message).with(
+        hash_including(text: a_string_including("Add this as a quote"))
+      )
+    end
+
+    it "honors a /command escape hatch" do
+      dispatcher.dispatch(parsed_update(text: "/ping"))
+      expect(client).to have_received(:send_message).with(
+        hash_including(text: "🏓 Pong!")
+      )
+    end
+  end
+
+  context "with /cancel command (state clearing)" do
+    before { user.update!(state: "awaiting_quote_text") }
+
+    it "clears the user state" do
+      dispatcher.dispatch(parsed_update(text: "/cancel"))
+      expect(user.reload.state).to be_nil
+    end
+
+    it "sends a cancellation message" do
+      dispatcher.dispatch(parsed_update(text: "/cancel"))
+      expect(client).to have_received(:send_message).with(
+        hash_including(text: a_string_including("Cancelled"))
+      )
+    end
+  end
+
+  # ── /schedule ───────────────────────────────────────────────────────────────
+
+  context "with /schedule command" do
+    before do
+      user.update!(timezone: "Europe/London")
+      allow(QuoteScheduler).to receive(:schedule_for)
+    end
+
+    context "with HH:MM argument" do
+      it "creates a delivery schedule" do
+        expect {
+          dispatcher.dispatch(parsed_update(text: "/schedule 09:00"))
+        }.to change { user.delivery_schedules.count }.by(1)
+      end
+
+      it "sets the correct hour and minute" do
+        dispatcher.dispatch(parsed_update(text: "/schedule 14:30"))
+        schedule = user.delivery_schedules.last
+        expect(schedule.hour).to eq(14)
+        expect(schedule.minute).to eq(30)
+      end
+
+      it "confirms the schedule" do
+        dispatcher.dispatch(parsed_update(text: "/schedule 09:00"))
+        expect(client).to have_received(:send_message).with(
+          hash_including(text: a_string_including("09:00"))
+        )
+      end
+
+      it "updates existing schedule instead of creating a second one (MVP: one per user)" do
+        create(:delivery_schedule, user: user, hour: 8, minute: 0)
+        expect {
+          dispatcher.dispatch(parsed_update(text: "/schedule 09:00"))
+        }.not_to change { user.delivery_schedules.count }
+        expect(user.delivery_schedules.last.hour).to eq(9)
+      end
+    end
+
+    context "without argument" do
+      it "prompts for time" do
+        dispatcher.dispatch(parsed_update(text: "/schedule"))
+        expect(client).to have_received(:send_message).with(
+          hash_including(text: a_string_including("time"))
+        )
+      end
+    end
+
+    context "when user has no timezone" do
+      before { user.update!(timezone: nil) }
+
+      it "asks user to set timezone first" do
+        dispatcher.dispatch(parsed_update(text: "/schedule 09:00"))
+        expect(client).to have_received(:send_message).with(
+          hash_including(text: a_string_including("timezone"))
+        )
+      end
+    end
+  end
+
+  context "with /cancel command when schedule exists" do
+    let!(:schedule) { create(:delivery_schedule, user: user, enabled: true) }
+
+    before { allow(QuoteScheduler).to receive(:cancel_pending_for) }
+
+    it "disables the schedule" do
+      dispatcher.dispatch(parsed_update(text: "/cancel"))
+      expect(schedule.reload.enabled).to be false
+    end
+
+    it "calls QuoteScheduler.cancel_pending_for" do
+      dispatcher.dispatch(parsed_update(text: "/cancel"))
+      expect(QuoteScheduler).to have_received(:cancel_pending_for)
+    end
+  end
 end

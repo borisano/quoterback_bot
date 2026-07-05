@@ -6,6 +6,9 @@ class User < ApplicationRecord
 
   validates :telegram_chat_id, presence: true, uniqueness: true
   validates :active, inclusion: { in: [ true, false ] }
+  validates :timezone,
+            inclusion: { in: ActiveSupport::TimeZone.all.map(&:tzinfo).map(&:name).uniq },
+            allow_nil: true
 
   scope :active, -> { where(active: true) }
 

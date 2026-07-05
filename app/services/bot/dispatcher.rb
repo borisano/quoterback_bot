@@ -29,21 +29,48 @@ module Bot
     def handle_text(update, user)
       text = update.text.strip
 
-      if user.state == "awaiting_quote_text"
-        return handle_awaiting_quote_text(update, user, text)
+      # /cancel always escapes any state
+      if text.downcase == "/cancel"
+        if user.state.present?
+          user.update!(state: nil)
+          client.send_message(chat_id: update.chat_id, text: "👍 Cancelled.")
+        else
+          schedules = user.delivery_schedules.where(enabled: true)
+          if schedules.any?
+            schedules.each do |sched|
+              QuoteScheduler.cancel_pending_for(sched)
+              sched.update!(enabled: false)
+            end
+            client.send_message(chat_id: update.chat_id, text: "⏹ Daily delivery stopped.")
+          else
+            client.send_message(chat_id: update.chat_id, text: "You don't have an active schedule.")
+          end
+        end
+        return
+      end
+
+      # State machine takes priority over commands (except /cancel above)
+      case user.state
+      when "awaiting_timezone"
+        return handle_awaiting_timezone_input(update, user, text) unless text.start_with?("/")
+      when "awaiting_quote_text"
+        return handle_awaiting_quote_text(update, user, text) unless text.start_with?("/")
       end
 
       command, rest = text.split(/\s+/, 2)
 
       case command.downcase
-      when "/start"               then handle_start(update, user)
-      when "/ping"                then handle_ping(update)
-      when "/add"                 then handle_add(update, user, rest)
-      when "/quote", "/random"    then handle_quote(update, user)
-      when "/list", "/quotes"     then handle_list(update, user)
-      when "/delete"              then handle_delete_command(update, user, rest)
-      when "/settings"            then handle_settings(update, user)
-      when "/help"                then handle_help(update, user)
+      when "/start"                        then handle_start(update, user)
+      when "/ping"                         then handle_ping(update)
+      when "/add"                          then handle_add(update, user, rest)
+      when "/quote", "/random"             then handle_quote(update, user)
+      when "/list", "/quotes"              then handle_list(update, user)
+      when "/delete"                       then handle_delete_command(update, user, rest)
+      when "/settings"                     then handle_settings(update, user)
+      when "/help"                         then handle_help(update, user)
+      when "/settimezone", "/timezone"     then handle_settimezone(update, user, rest)
+      when "/schedule"                     then handle_schedule_command(update, user, rest)
+      when "/cancel"                       then # already handled above
       else
         if text.match?(/ping me in/i)
           return handle_schedule_ping(update)
@@ -58,7 +85,7 @@ module Bot
       case data
       when /\Aob:tz\z/
         client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
-        client.send_message(chat_id: update.chat_id, text: "🌍 Timezone setup coming soon! For now use /settimezone")
+        show_timezone_picker(update, user)
       when /\Aob:help\z/
         client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
         handle_help(update, user)
@@ -82,6 +109,12 @@ module Bot
         handle_list_page_callback(update, user, $1.to_i)
       when /\Alist:noop\z/
         client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
+      when /\Atz:idx:(\d+)\z/
+        handle_tz_idx_callback(update, user, $1.to_i)
+      when /\Atz:type\z/
+        client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
+        user.update!(state: "awaiting_timezone")
+        client.send_message(chat_id: update.chat_id, text: "⌨️ Type your city, country, or UTC offset (e.g. London, +9, UTC-5):")
       when /\Aset:(.+)\z/
         client.answer_callback_query(callback_query_id: update.callback_query_id, text: "🚧 Coming soon!")
       else
@@ -494,6 +527,130 @@ module Bot
       client.send_message(
         chat_id: update.chat_id,
         text: "⏱ I'll ping you back in #{minutes} minute#{"s" if minutes != 1}!"
+      )
+    end
+
+    def handle_settimezone(update, user, tz_input)
+      if tz_input.present?
+        apply_timezone(update, user, tz_input)
+      else
+        show_timezone_picker(update, user)
+      end
+    end
+
+    def show_timezone_picker(update, user)
+      zones = Bot::TimezoneParser.common_zones
+      cache_key = "tz_picker:#{update.chat_id}"
+      Rails.cache.write(cache_key, zones.map(&:name), expires_in: 10.minutes)
+
+      buttons = zones.each_with_index.map do |zone, i|
+        now = Time.current.in_time_zone(zone)
+        [ { text: "#{zone.name} (#{now.strftime('%H:%M')})", callback_data: "tz:idx:#{i}" } ]
+      end
+      buttons << [ { text: "⌨️ Type city or UTC offset", callback_data: "tz:type" } ]
+
+      client.send_message(
+        chat_id: update.chat_id,
+        text: "🌍 Choose your timezone:",
+        reply_markup: { inline_keyboard: buttons }
+      )
+    end
+
+    def apply_timezone(update, user, tz_input)
+      tz = Bot::TimezoneParser.parse(tz_input)
+      if tz.nil?
+        client.send_message(
+          chat_id: update.chat_id,
+          text: "❓ Couldn't recognize that timezone. Try a city name, IANA zone (e.g. Europe/London), or offset like +9.\n\nUse /settimezone to see the list."
+        )
+        return
+      end
+
+      old_timezone = user.timezone
+      user.update!(timezone: tz.tzinfo.name, state: nil)
+
+      local_now = Time.current.in_time_zone(tz)
+      client.send_message(
+        chat_id: update.chat_id,
+        text: "✅ Timezone set to *#{tz.name}* (#{local_now.strftime('%Z %z')}, local time #{local_now.strftime('%H:%M')})."
+      )
+
+      reschedule_all_for(user) if old_timezone != tz.tzinfo.name
+    end
+
+    def handle_awaiting_timezone_input(update, user, text)
+      apply_timezone(update, user, text)
+    end
+
+    def handle_tz_idx_callback(update, user, idx)
+      cache_key = "tz_picker:#{update.chat_id}"
+      zone_names = Rails.cache.read(cache_key)
+
+      unless zone_names && zone_names[idx]
+        client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
+        show_timezone_picker(update, user)
+        return
+      end
+
+      client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
+      apply_timezone(update, user, zone_names[idx])
+    end
+
+    def reschedule_all_for(user)
+      user.delivery_schedules.where(enabled: true).each do |schedule|
+        QuoteScheduler.schedule_for(schedule)
+      rescue => e
+        Rails.logger.error("[Dispatcher] reschedule error for schedule #{schedule.id}: #{e.message}")
+      end
+    end
+
+    def handle_schedule_command(update, user, time_str)
+      unless user.timezone.present?
+        client.send_message(
+          chat_id: update.chat_id,
+          text: "🌍 Please set your timezone first with /settimezone before scheduling.",
+          reply_markup: { inline_keyboard: [ [ { text: "🌍 Set timezone", callback_data: "ob:tz" } ] ] }
+        )
+        return
+      end
+
+      if time_str.blank?
+        client.send_message(
+          chat_id: update.chat_id,
+          text: "⏰ What time should I send your daily quote?\n\nUse format HH:MM, e.g. /schedule 09:00"
+        )
+        return
+      end
+
+      match = time_str.strip.match(/\A(\d{1,2}):(\d{2})\z/)
+      unless match
+        client.send_message(chat_id: update.chat_id,
+          text: "❓ Couldn't parse that time. Please use HH:MM format, e.g. /schedule 09:00")
+        return
+      end
+
+      hour   = match[1].to_i
+      minute = match[2].to_i
+
+      unless (0..23).include?(hour) && (0..59).include?(minute)
+        client.send_message(chat_id: update.chat_id,
+          text: "❓ Invalid time. Hour must be 0–23, minute 0–59.")
+        return
+      end
+
+      schedule = user.delivery_schedules.first_or_initialize
+      schedule.assign_attributes(hour: hour, minute: minute, enabled: true)
+      schedule.save!
+
+      QuoteScheduler.schedule_for(schedule)
+
+      tz = ActiveSupport::TimeZone[user.timezone]
+      local_now = Time.current.in_time_zone(tz)
+      client.send_message(
+        chat_id: update.chat_id,
+        text: "✅ Daily quote scheduled for *#{format('%02d:%02d', hour, minute)}* " \
+              "(#{tz.name}, your current time: #{local_now.strftime('%H:%M')}).\n\n" \
+              "Use /cancel to stop daily delivery."
       )
     end
 
