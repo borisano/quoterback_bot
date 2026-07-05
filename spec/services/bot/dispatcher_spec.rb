@@ -2,7 +2,13 @@ require "rails_helper"
 
 RSpec.describe Bot::Dispatcher do
   let(:client) { double("TelegramClient") }  # rubocop:disable RSpec/VerifiedDoubles — TelegramClient delegates via method_missing
+  let(:user) { create(:user, telegram_chat_id: 111) }
   let(:dispatcher) { described_class.new(client: client) }
+
+  before do
+    allow(User).to receive(:find_or_create_from_update!).and_return(user)
+    allow(client).to receive(:send_message)
+  end
 
   def parsed_update(text:, chat_id: 111)
     Bot::UpdateParser::ParsedUpdate.new(

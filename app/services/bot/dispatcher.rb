@@ -9,10 +9,12 @@ module Bot
     def dispatch(update)
       return if update.nil?
 
+      user = User.find_or_create_from_update!(update)
+
       if update.callback_data
-        handle_callback(update)
+        handle_callback(update, user)
       elsif update.text.present?
-        handle_text(update)
+        handle_text(update, user)
       end
     rescue StandardError => e
       Rails.logger.error("[Bot::Dispatcher] Error: #{e.class} — #{e.message}")
@@ -22,13 +24,13 @@ module Bot
 
     attr_reader :client
 
-    def handle_text(update)
+    def handle_text(update, user)
       text = update.text.strip
       command = text.split(/\s+/, 2).first.downcase
 
       case command
       when "/start"
-        handle_start(update)
+        handle_start(update, user)
       when "/ping"
         handle_ping(update)
       else
@@ -36,14 +38,14 @@ module Bot
       end
     end
 
-    def handle_callback(update)
+    def handle_callback(update, user)
       # Placeholder — callback routing added per-feature
     end
 
-    def handle_start(update)
+    def handle_start(update, user)
       client.send_message(
         chat_id: update.chat_id,
-        text: "👋 Welcome to QuoterBack! Use /ping to test the connection."
+        text: "👋 Welcome to QuoterBack, #{user.first_name || 'friend'}! Use /ping to test the connection."
       )
     end
 
