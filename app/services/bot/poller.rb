@@ -26,6 +26,9 @@ module Bot
       rescue StandardError => e
         Rails.logger.error("[Bot::Poller] error: #{e.class}: #{e.message}")
       end
+    rescue SignalException, Interrupt
+      # Graceful shutdown — foreman sends SIGTERM, Ctrl-C sends SIGINT.
+      Rails.logger.info("[Bot::Poller] shutting down")
     end
 
     private
