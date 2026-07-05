@@ -16,7 +16,7 @@ module Bot
 
     def list_preview
       content = @quote.content.truncate(120)
-      lines = [content]
+      lines = [ content ]
       lines << "— #{@quote.author}" if @quote.author.present?
       lines.join("\n")
     end
@@ -24,7 +24,7 @@ module Bot
     private
 
     def build_text(budget:)
-      parts = [@quote.content]
+      parts = [ @quote.content ]
       parts << "— #{@quote.author}" if @quote.author.present?
       parts << "(#{@quote.source})" if @quote.source.present?
       parts.join("\n").truncate(budget)

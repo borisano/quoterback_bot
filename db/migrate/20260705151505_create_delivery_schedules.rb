@@ -10,7 +10,7 @@ class CreateDeliverySchedules < ActiveRecord::Migration[8.1]
       t.string  :pending_job_id
       t.timestamps
     end
-    add_index :delivery_schedules, [:enabled, :user_id]
+    add_index :delivery_schedules, [ :enabled, :user_id ]
     add_index :delivery_schedules, :pending_job_id
   end
 end

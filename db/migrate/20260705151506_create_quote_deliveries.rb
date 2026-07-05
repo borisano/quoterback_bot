@@ -9,6 +9,6 @@ class CreateQuoteDeliveries < ActiveRecord::Migration[8.1]
       t.datetime :delivered_at, null: false
       t.timestamps
     end
-    add_index :quote_deliveries, [:user_id, :delivery_schedule_id, :local_date], unique: true, name: 'index_quote_deliveries_on_user_sched_date'
+    add_index :quote_deliveries, [ :user_id, :delivery_schedule_id, :local_date ], unique: true, name: 'index_quote_deliveries_on_user_sched_date'
   end
 end

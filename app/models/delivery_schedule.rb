@@ -4,7 +4,7 @@ class DeliverySchedule < ApplicationRecord
 
   validates :hour, presence: true, inclusion: { in: 0..23 }
   validates :minute, presence: true, inclusion: { in: 0..59 }
-  validates :enabled, inclusion: { in: [true, false] }
+  validates :enabled, inclusion: { in: [ true, false ] }
 
   scope :enabled, -> { where(enabled: true) }
 end

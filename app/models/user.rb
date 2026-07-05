@@ -5,7 +5,7 @@ class User < ApplicationRecord
   has_many :quote_deliveries, dependent: :destroy
 
   validates :telegram_chat_id, presence: true, uniqueness: true
-  validates :active, inclusion: { in: [true, false] }
+  validates :active, inclusion: { in: [ true, false ] }
 
   scope :active, -> { where(active: true) }
 

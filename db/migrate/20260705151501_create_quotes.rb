@@ -11,6 +11,6 @@ class CreateQuotes < ActiveRecord::Migration[8.1]
       t.datetime :last_delivered_at
       t.timestamps
     end
-    add_index :quotes, [:user_id, :created_at]
+    add_index :quotes, [ :user_id, :created_at ]
   end
 end
