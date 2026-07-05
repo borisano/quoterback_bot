@@ -1,0 +1,3 @@
+web: bin/rails server -p ${PORT:-3000}
+jobs: bin/jobs
+bot: bin/rails bot:poll
