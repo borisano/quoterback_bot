@@ -60,4 +60,27 @@ RSpec.describe User, type: :model do
       expect(build(:user, :with_timezone).configured?).to be true
     end
   end
+
+  describe "STATES constant" do
+    it "includes awaiting_tag_name" do
+      expect(User::STATES).to include("awaiting_tag_name")
+    end
+  end
+
+  describe "state validation" do
+    it "allows nil state" do
+      user = build(:user, state: nil)
+      expect(user).to be_valid
+    end
+
+    it "rejects invalid state" do
+      user = build(:user, state: "invalid_state")
+      expect(user).not_to be_valid
+    end
+
+    it "accepts valid state" do
+      user = build(:user, state: "awaiting_tag_name")
+      expect(user).to be_valid
+    end
+  end
 end

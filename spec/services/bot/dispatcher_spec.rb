@@ -655,4 +655,31 @@ RSpec.describe Bot::Dispatcher do
       )
     end
   end
+
+  context "with /start payload" do
+    it "does not crash with an unknown payload" do
+      expect { dispatcher.dispatch(parsed_update(text: "/start q_sometoken")) }.not_to raise_error
+    end
+
+    it "sends welcome message even with payload" do
+      dispatcher.dispatch(parsed_update(text: "/start q_sometoken"))
+      expect(client).to have_received(:send_message).with(
+        hash_including(text: a_string_including("Welcome"))
+      )
+    end
+  end
+
+  context "with ob:addfirst callback" do
+    it "sets state to awaiting_quote_text" do
+      dispatcher.dispatch(parsed_update(callback_data: "ob:addfirst", callback_query_id: "ob1"))
+      expect(user.reload.state).to eq("awaiting_quote_text")
+    end
+
+    it "prompts the user to send a quote" do
+      dispatcher.dispatch(parsed_update(callback_data: "ob:addfirst", callback_query_id: "ob1"))
+      expect(client).to have_received(:send_message).with(
+        hash_including(text: a_string_including("first quote"))
+      )
+    end
+  end
 end
