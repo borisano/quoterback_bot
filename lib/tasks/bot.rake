@@ -43,16 +43,13 @@ namespace :bot do
     client = Telegram::Bot::Client.new(token)
     result = client.api.set_my_commands(
       commands: [
-        { command: "start",  description: "Start the bot" },
-        { command: "ping",   description: "Test the connection" },
-        { command: "add",    description: "Add a quote" },
-        { command: "quote",  description: "Get a random quote" },
-        { command: "list",   description: "Browse your quotes" },
-        { command: "delete", description: "Delete a quote" },
-        { command: "settings", description: "Your settings" },
-        { command: "schedule", description: "Set daily delivery time" },
-        { command: "cancel",   description: "Turn off daily delivery" },
-        { command: "settimezone", description: "Set your timezone" }
+        { command: "quote",       description: "Get a random quote 🎲" },
+        { command: "list",        description: "Browse your quotes 📋" },
+        { command: "add",         description: "Add a quote ✍️" },
+        { command: "settings",    description: "Your settings ⚙️" },
+        { command: "schedule",    description: "Set daily delivery ⏰" },
+        { command: "settimezone", description: "Set your timezone 🌍" },
+        { command: "help",        description: "How it works 📖" }
       ].to_json
     )
     ok = result.respond_to?(:ok) ? result.ok : result == true
