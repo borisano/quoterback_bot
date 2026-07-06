@@ -17,8 +17,9 @@ module Admin
       end
 
       authenticate_or_request_with_http_basic("Admin") do |u, p|
-        ActiveSupport::SecurityUtils.secure_compare(u, username) &
-          ActiveSupport::SecurityUtils.secure_compare(p, password)
+        u.present? && p.present? &&
+          ActiveSupport::SecurityUtils.secure_compare(u, username) &
+            ActiveSupport::SecurityUtils.secure_compare(p, password)
       end
     end
   end

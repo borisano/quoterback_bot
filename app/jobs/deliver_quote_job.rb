@@ -58,7 +58,24 @@ class DeliverQuoteJob < ApplicationJob
     else
       user.quotes
     end
-    scope.order(Arel.sql("last_delivered_at ASC NULLS FIRST")).first(20).sample
+
+    # Least-recently-delivered candidate pool, then favourite-weighted pick.
+    candidates = scope.order(Arel.sql("last_delivered_at ASC NULLS FIRST")).first(20)
+    weighted_sample(candidates)
+  end
+
+  # Favourited quotes get FAVOURITE_WEIGHT entries in the pool vs 1 for the rest,
+  # so they are ~3x more likely to be chosen while non-favourites still appear.
+  FAVOURITE_WEIGHT = 3
+
+  def weighted_sample(quotes)
+    return nil if quotes.empty?
+
+    weighted_sample_pool(quotes).sample
+  end
+
+  def weighted_sample_pool(quotes)
+    quotes.flat_map { |q| q.favourited? ? [ q ] * FAVOURITE_WEIGHT : [ q ] }
   end
 
   def record_delivery(quote, schedule, user)

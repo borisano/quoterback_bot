@@ -200,6 +200,36 @@ RSpec.describe Bot::Dispatcher do
           )
         end
       end
+
+      context "with a #tag filter" do
+        let!(:tag) { create(:tag, user: user, name: "stoic") }
+        let!(:tagged) { create(:quote, user: user) }
+        let!(:untagged) { create(:quote, user: user) }
+        before { tagged.taggings.create!(tag: tag) }
+
+        it "lists only quotes with that tag" do
+          dispatcher.dispatch(parsed_update(text: "/list #stoic"))
+          expect(client).to have_received(:send_message).with(
+            hash_including(text: a_string_including("tagged #stoic"))
+          )
+        end
+
+        it "carries the tag filter into pagination callbacks" do
+          create_list(:quote, 12, user: user).each { |q| q.taggings.create!(tag: tag) }
+          dispatcher.dispatch(parsed_update(text: "/list #stoic"))
+          expect(client).to have_received(:send_message).with(
+            hash_including(reply_markup: hash_including(:inline_keyboard))
+          )
+        end
+
+        it "reports empty for a #tag with no quotes" do
+          tagged.taggings.destroy_all
+          dispatcher.dispatch(parsed_update(text: "/list #stoic"))
+          expect(client).to have_received(:send_message).with(
+            hash_including(text: a_string_including("no quotes tagged"))
+          )
+        end
+      end
     end
 
     context "with /delete command" do
@@ -359,6 +389,24 @@ RSpec.describe Bot::Dispatcher do
         dispatcher.dispatch(parsed_update(text: "/settimezone London"))
         expect(client).to have_received(:send_message).with(
           hash_including(chat_id: 111, text: a_string_including("Timezone updated"))
+        )
+      end
+    end
+
+    context "setting timezone for the first time (onboarding)" do
+      before { user.update!(timezone: nil) }
+
+      it "shows the onboarding completion message" do
+        dispatcher.dispatch(parsed_update(text: "/settimezone London"))
+        expect(client).to have_received(:send_message).with(
+          hash_including(text: a_string_including("all set"))
+        )
+      end
+
+      it "offers an add-first-quote button" do
+        dispatcher.dispatch(parsed_update(text: "/settimezone London"))
+        expect(client).to have_received(:send_message).with(
+          hash_including(reply_markup: hash_including(:inline_keyboard))
         )
       end
     end
@@ -539,6 +587,28 @@ RSpec.describe Bot::Dispatcher do
       expect(client).to have_received(:answer_callback_query).with(
         hash_including(text: a_string_including("stoic"))
       )
+    end
+
+    it "is idempotent — adding the same tag twice does not duplicate" do
+      dispatcher.dispatch(parsed_update(callback_data: "tag:add:#{quote.id}:#{tag.id}", callback_query_id: "cq2"))
+      expect {
+        dispatcher.dispatch(parsed_update(callback_data: "tag:add:#{quote.id}:#{tag.id}", callback_query_id: "cq2"))
+      }.not_to change { quote.taggings.count }
+    end
+
+    it "rejects another user's tag_id (no cross-user tagging)" do
+      other_user = create(:user)
+      other_tag = create(:tag, user: other_user, name: "theirs")
+      expect {
+        dispatcher.dispatch(parsed_update(callback_data: "tag:add:#{quote.id}:#{other_tag.id}", callback_query_id: "cq2"))
+      }.not_to change { quote.taggings.count }
+    end
+
+    it "rejects another user's quote_id (no cross-user tagging)" do
+      other_user = create(:user)
+      other_quote = create(:quote, user: other_user)
+      dispatcher.dispatch(parsed_update(callback_data: "tag:add:#{other_quote.id}:#{tag.id}", callback_query_id: "cq2"))
+      expect(other_quote.taggings.count).to eq(0)
     end
   end
 

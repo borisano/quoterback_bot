@@ -41,6 +41,21 @@ RSpec.describe DeliverQuoteJob, type: :job do
       end
     end
 
+    describe "#weighted_sample (favourite weighting)" do
+      it "gives favourited quotes a higher weight in the pool" do
+        job = described_class.new
+        fav = create(:quote, user: user, favourited: true)
+        plain = create(:quote, user: user, favourited: false)
+        pool = job.send(:weighted_sample_pool, [ fav, plain ])
+        expect(pool.count(fav)).to eq(DeliverQuoteJob::FAVOURITE_WEIGHT)
+        expect(pool.count(plain)).to eq(1)
+      end
+
+      it "returns nil for an empty candidate list" do
+        expect(described_class.new.send(:weighted_sample, [])).to be_nil
+      end
+    end
+
     context "stale job guard" do
       it "does nothing when job_id does not match pending_job_id" do
         schedule.update!(pending_job_id: "different-id")

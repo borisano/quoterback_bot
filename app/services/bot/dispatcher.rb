@@ -134,8 +134,8 @@ module Bot
         handle_quote_delete_yes(update, user, $1.to_i)
       when /\Aq:deln:(\d+)\z/
         handle_quote_delete_no(update, user, $1.to_i)
-      when /\Alist:pg:(\d+)\z/
-        handle_list_page_callback(update, user, $1.to_i)
+      when /\Alist:pg:(\d+)(?::(\d+))?\z/
+        handle_list_page_callback(update, user, $1.to_i, $2&.to_i)
       when /\Alist:noop\z/
         client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
       when /\Atz:idx:(\d+)\z/
@@ -287,7 +287,6 @@ module Bot
           # if no match, tag stays nil and we fall back to random (N11)
         end
       end
-
       quote = Quote.random_for(user, tag: tag)
 
       if quote.nil?
@@ -386,15 +385,54 @@ module Bot
     end
 
     def handle_list(update, user, tag_arg: nil, page: 1)
-      quotes = user.quotes.order(created_at: :asc)
+      tag = resolve_list_tag(update, user, tag_arg)
+      return if tag == :not_found
+
+      render_list(update, user, page: page, tag: tag, edit: false)
+    end
+
+    def handle_list_page_callback(update, user, page, tag_id = nil)
+      client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
+      tag = tag_id ? user.tags.find_by(id: tag_id) : nil
+      render_list(update, user, page: page, tag: tag, edit: true)
+    end
+
+    # Resolves a /list tag argument. Returns the Tag, nil (no filter), or
+    # :not_found (an explicit #tag with no match — caller should bail).
+    def resolve_list_tag(update, user, tag_arg)
+      return nil if tag_arg.blank?
+
+      raw = tag_arg.strip
+      if raw.start_with?("#")
+        tag_name = raw.sub(/\A#+/, "").downcase.gsub(/\s+/, "_")
+        tag = user.tags.find_by(name: tag_name)
+        if tag.nil?
+          client.send_message(chat_id: update.chat_id, text: "🏷 You have no quotes tagged ##{tag_name} yet.")
+          return :not_found
+        end
+        tag
+      else
+        # Bare word: filter only on an exact tag hit, else no filter (N11)
+        user.tags.find_by(name: raw.downcase)
+      end
+    end
+
+    def render_list(update, user, page:, tag:, edit:)
+      quotes = if tag
+        user.quotes.joins(:taggings).where(taggings: { tag_id: tag.id }).order(created_at: :asc)
+      else
+        user.quotes.order(created_at: :asc)
+      end
       total = quotes.count
 
       if total == 0
-        client.send_message(
-          chat_id: update.chat_id,
-          text: "📭 You have no quotes yet! Send me any text and I'll save it for you.",
-          reply_markup: { inline_keyboard: [ [ { text: "📥 How to add", callback_data: "ob:help" } ] ] }
-        )
+        empty_text = tag ? "🏷 You have no quotes tagged ##{tag.name} yet." : "📭 You have no quotes yet! Send me any text and I'll save it for you."
+        markup = { inline_keyboard: [ [ { text: "📥 How to add", callback_data: "ob:help" } ] ] }
+        if edit
+          client.edit_message_text(chat_id: update.chat_id, message_id: update.message_id, text: empty_text, reply_markup: markup)
+        else
+          client.send_message(chat_id: update.chat_id, text: empty_text, reply_markup: markup)
+        end
         return
       end
 
@@ -405,67 +443,31 @@ module Bot
 
       lines = page_quotes.each_with_index.map do |q, i|
         num = offset + i + 1
-        preview = q.content.truncate(80)
-        "#{num}. #{preview}"
+        "#{num}. #{q.content.truncate(80)}"
       end
 
-      text = "📋 *Your Quotes* (#{total} total)\n\n#{lines.join("\n\n")}"
+      header = tag ? "📋 *Quotes tagged ##{tag.name}* (#{total} total)" : "📋 *Your Quotes* (#{total} total)"
+      text = "#{header}\n\n#{lines.join("\n\n")}"
+
+      # Carry the tag filter through pagination via the trailing :<tag_id> segment
+      tag_suffix = tag ? ":#{tag.id}" : ""
 
       number_buttons = page_quotes.each_with_index.map do |q, i|
         { text: "#{offset + i + 1}", callback_data: "q:show:#{q.id}" }
       end
 
       nav = []
-      nav << { text: "⬅️", callback_data: "list:pg:#{page - 1}" } if page > 1
+      nav << { text: "⬅️", callback_data: "list:pg:#{page - 1}#{tag_suffix}" } if page > 1
       nav << { text: "#{page}/#{total_pages}", callback_data: "list:noop" }
-      nav << { text: "➡️", callback_data: "list:pg:#{page + 1}" } if page < total_pages
+      nav << { text: "➡️", callback_data: "list:pg:#{page + 1}#{tag_suffix}" } if page < total_pages
 
       keyboard = [ number_buttons, nav, [ { text: "🎲 Random", callback_data: "q:rand:0" } ] ]
 
-      client.send_message(
-        chat_id: update.chat_id,
-        text: text,
-        reply_markup: { inline_keyboard: keyboard }
-      )
-    end
-
-    def handle_list_page_callback(update, user, page)
-      client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
-
-      quotes = user.quotes.order(created_at: :asc)
-      total = quotes.count
-      return if total == 0
-
-      total_pages = (total.to_f / PAGE_SIZE).ceil
-      page = [ [ page, 1 ].max, total_pages ].min
-      offset = (page - 1) * PAGE_SIZE
-      page_quotes = quotes.offset(offset).limit(PAGE_SIZE).to_a
-
-      lines = page_quotes.each_with_index.map do |q, i|
-        num = offset + i + 1
-        preview = q.content.truncate(80)
-        "#{num}. #{preview}"
+      if edit
+        client.edit_message_text(chat_id: update.chat_id, message_id: update.message_id, text: text, reply_markup: { inline_keyboard: keyboard })
+      else
+        client.send_message(chat_id: update.chat_id, text: text, reply_markup: { inline_keyboard: keyboard })
       end
-
-      text = "📋 *Your Quotes* (#{total} total)\n\n#{lines.join("\n\n")}"
-
-      number_buttons = page_quotes.each_with_index.map do |q, i|
-        { text: "#{offset + i + 1}", callback_data: "q:show:#{q.id}" }
-      end
-
-      nav = []
-      nav << { text: "⬅️", callback_data: "list:pg:#{page - 1}" } if page > 1
-      nav << { text: "#{page}/#{total_pages}", callback_data: "list:noop" }
-      nav << { text: "➡️", callback_data: "list:pg:#{page + 1}" } if page < total_pages
-
-      keyboard = [ number_buttons, nav, [ { text: "🎲 Random", callback_data: "q:rand:0" } ] ]
-
-      client.edit_message_text(
-        chat_id: update.chat_id,
-        message_id: update.message_id,
-        text: text,
-        reply_markup: { inline_keyboard: keyboard }
-      )
     end
 
     def handle_delete_command(update, user, id_str)
