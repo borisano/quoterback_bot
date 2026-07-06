@@ -4,11 +4,24 @@ class User < ApplicationRecord
   has_many :delivery_schedules, dependent: :destroy
   has_many :quote_deliveries, dependent: :destroy
 
+  STATES = %w[
+    new
+    awaiting_timezone
+    awaiting_schedule_time
+    awaiting_quote_text
+    awaiting_quote_text_for_photo
+    awaiting_image_for_quote
+    awaiting_import_file
+    awaiting_tag_name
+    ready
+  ].freeze
+
   validates :telegram_chat_id, presence: true, uniqueness: true
   validates :active, inclusion: { in: [ true, false ] }
   validates :timezone,
             inclusion: { in: ActiveSupport::TimeZone.all.map(&:tzinfo).map(&:name).uniq },
             allow_nil: true
+  validates :state, inclusion: { in: STATES }, allow_nil: true
 
   scope :active, -> { where(active: true) }
 
@@ -19,6 +32,8 @@ class User < ApplicationRecord
     user.last_interaction_at = Time.current
     user.save!
     user
+  rescue ActiveRecord::RecordNotUnique
+    retry
   end
 
   def configured?

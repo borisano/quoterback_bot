@@ -348,6 +348,8 @@ RSpec.describe Bot::Dispatcher do
 
   context "with /settimezone command" do
     context "with a valid timezone" do
+      before { user.update!(timezone: "America/New_York") }
+
       it "sets the user's timezone" do
         dispatcher.dispatch(parsed_update(text: "/settimezone London"))
         expect(user.reload.timezone).to eq("Europe/London")
@@ -356,7 +358,7 @@ RSpec.describe Bot::Dispatcher do
       it "sends a confirmation message" do
         dispatcher.dispatch(parsed_update(text: "/settimezone London"))
         expect(client).to have_received(:send_message).with(
-          hash_including(chat_id: 111, text: a_string_including("Timezone set"))
+          hash_including(chat_id: 111, text: a_string_including("Timezone updated"))
         )
       end
     end
@@ -508,6 +510,140 @@ RSpec.describe Bot::Dispatcher do
     it "calls QuoteScheduler.cancel_pending_for" do
       dispatcher.dispatch(parsed_update(text: "/cancel"))
       expect(QuoteScheduler).to have_received(:cancel_pending_for)
+    end
+  end
+
+  context "with q:tag:<id> callback" do
+    let!(:quote) { create(:quote, user: user) }
+
+    it "sends the tag picker" do
+      dispatcher.dispatch(parsed_update(callback_data: "q:tag:#{quote.id}", callback_query_id: "cq1"))
+      expect(client).to have_received(:send_message).with(
+        hash_including(text: a_string_including("Tag this quote"))
+      )
+    end
+  end
+
+  context "with tag:add:<quote_id>:<tag_id> callback" do
+    let!(:quote) { create(:quote, user: user) }
+    let!(:tag) { create(:tag, user: user, name: "stoic") }
+
+    it "adds the tag to the quote" do
+      expect {
+        dispatcher.dispatch(parsed_update(callback_data: "tag:add:#{quote.id}:#{tag.id}", callback_query_id: "cq2"))
+      }.to change { quote.taggings.count }.by(1)
+    end
+
+    it "answers with a toast confirming the tag" do
+      dispatcher.dispatch(parsed_update(callback_data: "tag:add:#{quote.id}:#{tag.id}", callback_query_id: "cq2"))
+      expect(client).to have_received(:answer_callback_query).with(
+        hash_including(text: a_string_including("stoic"))
+      )
+    end
+  end
+
+  context "with tag:rm:<quote_id>:<tag_id> callback" do
+    let!(:quote) { create(:quote, user: user) }
+    let!(:tag) { create(:tag, user: user, name: "stoic") }
+    before { quote.taggings.create!(tag: tag) }
+
+    it "removes the tag from the quote" do
+      expect {
+        dispatcher.dispatch(parsed_update(callback_data: "tag:rm:#{quote.id}:#{tag.id}", callback_query_id: "cq3"))
+      }.to change { quote.taggings.count }.by(-1)
+    end
+  end
+
+  context "with fav:toggle:<id> callback" do
+    let!(:quote) { create(:quote, user: user, favourited: false) }
+
+    it "toggles favourited to true" do
+      dispatcher.dispatch(parsed_update(callback_data: "fav:toggle:#{quote.id}", callback_query_id: "cq4"))
+      expect(quote.reload.favourited).to be true
+    end
+
+    it "answers with a heart toast" do
+      dispatcher.dispatch(parsed_update(callback_data: "fav:toggle:#{quote.id}", callback_query_id: "cq4"))
+      expect(client).to have_received(:answer_callback_query).with(
+        hash_including(text: a_string_including("❤️"))
+      )
+    end
+
+    it "toggles back to false on second tap" do
+      quote.update!(favourited: true)
+      dispatcher.dispatch(parsed_update(callback_data: "fav:toggle:#{quote.id}", callback_query_id: "cq4"))
+      expect(quote.reload.favourited).to be false
+    end
+  end
+
+  context "when in awaiting_tag_name state" do
+    let!(:quote) { create(:quote, user: user) }
+    before do
+      user.update!(state: "awaiting_tag_name")
+      Rails.cache.write("pending_tag_quote:#{user.telegram_chat_id}", quote.id, expires_in: 10.minutes)
+    end
+
+    it "creates a tag with the normalized name and applies it" do
+      dispatcher.dispatch(parsed_update(text: "#STOIC"))
+      expect(quote.reload.tags.map(&:name)).to include("stoic")
+    end
+
+    it "clears state after tagging" do
+      dispatcher.dispatch(parsed_update(text: "motivation"))
+      expect(user.reload.state).to be_nil
+    end
+
+    it "echoes the normalized name back" do
+      dispatcher.dispatch(parsed_update(text: "#STOIC"))
+      expect(client).to have_received(:send_message).with(
+        hash_including(text: a_string_including("#stoic"))
+      )
+    end
+
+    it "does NOT trigger confirm-on-text" do
+      dispatcher.dispatch(parsed_update(text: "motivation"))
+      expect(client).not_to have_received(:send_message).with(
+        hash_including(text: a_string_including("Add this as a quote"))
+      )
+    end
+
+    it "rejects invalid tag names" do
+      dispatcher.dispatch(parsed_update(text: "!!!"))
+      expect(user.reload.state).to eq("awaiting_tag_name") # stays in state
+    end
+  end
+
+  context "with /quote #tag argument" do
+    let!(:tag) { create(:tag, user: user, name: "stoic") }
+    let!(:tagged_quote) { create(:quote, user: user) }
+    before { tagged_quote.taggings.create!(tag: tag) }
+
+    it "returns a quote from that tag" do
+      dispatcher.dispatch(parsed_update(text: "/quote #stoic"))
+      expect(client).to have_received(:send_message).with(
+        hash_including(chat_id: 111)
+      )
+    end
+
+    it "reports no quotes when tag is empty" do
+      tagged_quote.taggings.destroy_all
+      dispatcher.dispatch(parsed_update(text: "/quote #stoic"))
+      expect(client).to have_received(:send_message).with(
+        hash_including(text: a_string_including("no quotes tagged"))
+      )
+    end
+  end
+
+  context "with /quote bare-word that is not an existing tag" do
+    it "falls back to random quote, NOT 'empty tag' (issue N11)" do
+      create(:quote, user: user)
+      dispatcher.dispatch(parsed_update(text: "/quote love"))
+      expect(client).to have_received(:send_message).with(
+        hash_including(chat_id: 111)
+      )
+      expect(client).not_to have_received(:send_message).with(
+        hash_including(text: a_string_including("no quotes tagged"))
+      )
     end
   end
 end

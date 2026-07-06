@@ -55,16 +55,19 @@ module Bot
         return handle_awaiting_timezone_input(update, user, text) unless text.start_with?("/")
       when "awaiting_quote_text"
         return handle_awaiting_quote_text(update, user, text) unless text.start_with?("/")
+      when "awaiting_tag_name"
+        return handle_awaiting_tag_name(update, user, text) unless text.start_with?("/")
       end
 
       command, rest = text.split(/\s+/, 2)
 
       case command.downcase
-      when "/start"                        then handle_start(update, user)
+      when "/start"                        then handle_start(update, user, rest.presence)
       when "/ping"                         then handle_ping(update)
       when "/add"                          then handle_add(update, user, rest)
-      when "/quote", "/random"             then handle_quote(update, user)
-      when "/list", "/quotes"              then handle_list(update, user)
+      when "/quote", "/random"             then handle_quote(update, user, tag_arg: rest)
+      when "/list", "/quotes"              then handle_list(update, user, tag_arg: rest)
+      when "/timezones"                    then handle_timezones(update, user)
       when "/delete"                       then handle_delete_command(update, user, rest)
       when "/settings"                     then handle_settings(update, user)
       when "/help"                         then handle_help(update, user)
@@ -89,6 +92,13 @@ module Bot
       when /\Aob:help\z/
         client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
         handle_help(update, user)
+      when /\Aob:addfirst\z/
+        client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
+        user.update!(state: "awaiting_quote_text")
+        client.send_message(
+          chat_id: update.chat_id,
+          text: "✍️ Send me your first quote — any text you want to save!"
+        )
       when /\Aqc:yes:(.+)\z/
         handle_quote_confirm_yes(update, user, $1)
       when /\Aqc:no:(.+)\z/
@@ -101,6 +111,25 @@ module Bot
       when /\Aq:del:(\d+)\z/
         client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
         handle_delete_confirm_callback(update, user, $1.to_i)
+      when /\Aq:tag:(\d+)\z/
+        client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
+        handle_tag_picker(update, user, $1.to_i)
+      when /\Atag:add:(\d+):(\d+)\z/
+        handle_tag_add(update, user, quote_id: $1.to_i, tag_id: $2.to_i)
+      when /\Atag:rm:(\d+):(\d+)\z/
+        handle_tag_remove(update, user, quote_id: $1.to_i, tag_id: $2.to_i)
+      when /\Atag:new:(\d+)\z/
+        handle_tag_new(update, user, $1.to_i)
+      when /\Afav:toggle:(\d+)\z/
+        handle_fav_toggle(update, user, $1.to_i)
+      when /\Aq:bytag:(\d+)\z/
+        tag = user.tags.find_by(id: $1.to_i)
+        client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
+        if tag
+          handle_quote(update, user, tag_arg: "##{tag.name}")
+        else
+          handle_quote(update, user)
+        end
       when /\Aq:dely:(\d+)\z/
         handle_quote_delete_yes(update, user, $1.to_i)
       when /\Aq:deln:(\d+)\z/
@@ -123,16 +152,22 @@ module Bot
       end
     end
 
-    def handle_start(update, user)
+    def handle_start(update, user, payload = nil)
+      user.update!(state: "new") unless user.state == "ready"
+
+      greeting = user.first_name.present? ? "Hey #{user.first_name}!" : "Hey there!"
+
       client.send_message(
         chat_id: update.chat_id,
-        text: "👋 Welcome to *QuoterBack*, #{user.first_name || 'friend'}!\n\nSend me any quote you love and I'll save it for you. You can get a random one back anytime with /quote.\n\nFirst, let's set your timezone so I can deliver quotes at the right time.",
+        text: "👋 #{greeting} Welcome to *QuoterBack* — your personal quote collection.\n\n" \
+              "Send me any quote you love and I'll save it. Get it back any time, or have me send one every day.\n\n" \
+              "Let's start by setting your timezone so I deliver at the right time for you.",
         reply_markup: {
-          inline_keyboard: [ [
-            { text: "🌍 Set my timezone", callback_data: "ob:tz" }
-          ], [
-            { text: "⏭ Skip for now", callback_data: "ob:help" }
-          ] ]
+          inline_keyboard: [
+            [ { text: "🌍 Set my timezone", callback_data: "ob:tz" } ],
+            [ { text: "✍️ Add my first quote", callback_data: "ob:addfirst" } ],
+            [ { text: "❓ How it works", callback_data: "ob:help" } ]
+          ]
         }
       )
     end
@@ -233,15 +268,41 @@ module Bot
       client.answer_callback_query(callback_query_id: update.callback_query_id, text: "👍 Dismissed")
     end
 
-    def handle_quote(update, user)
-      quote = Quote.random_for(user)
+    def handle_quote(update, user, tag_arg: nil)
+      tag = nil
+      if tag_arg.present?
+        raw = tag_arg.strip
+        if raw.start_with?("#")
+          tag_name = raw.sub(/\A#+/, "").downcase.gsub(/\s+/, "_")
+          tag = user.tags.find_by(name: tag_name)
+          if tag.nil?
+            client.send_message(
+              chat_id: update.chat_id,
+              text: "🏷 You have no quotes tagged ##{tag_name} yet."
+            )
+            return
+          end
+        else
+          tag = user.tags.find_by(name: raw.downcase)
+          # if no match, tag stays nil and we fall back to random (N11)
+        end
+      end
+
+      quote = Quote.random_for(user, tag: tag)
 
       if quote.nil?
-        client.send_message(
-          chat_id: update.chat_id,
-          text: "📭 You have no quotes yet! Send me any text and I'll save it for you.",
-          reply_markup: { inline_keyboard: [ [ { text: "📥 How to add quotes", callback_data: "ob:help" } ] ] }
-        )
+        if tag
+          client.send_message(
+            chat_id: update.chat_id,
+            text: "🏷 You have no quotes tagged ##{tag.name} yet."
+          )
+        else
+          client.send_message(
+            chat_id: update.chat_id,
+            text: "📭 You have no quotes yet! Send me any text and I'll save it for you.",
+            reply_markup: { inline_keyboard: [ [ { text: "📥 How to add quotes", callback_data: "ob:help" } ] ] }
+          )
+        end
         return
       end
 
@@ -251,7 +312,10 @@ module Bot
         text: presenter.message_text,
         reply_markup: {
           inline_keyboard: [ [
-            { text: "🗑 Delete", callback_data: "q:del:#{quote.id}" },
+            { text: "🏷 Tag", callback_data: "q:tag:#{quote.id}" },
+            { text: "❤️ Fav", callback_data: "fav:toggle:#{quote.id}" },
+            { text: "🗑 Delete", callback_data: "q:del:#{quote.id}" }
+          ], [
             { text: "🎲 Another", callback_data: "q:rand:0" }
           ] ]
         }
@@ -282,7 +346,10 @@ module Bot
         text: presenter.message_text,
         reply_markup: {
           inline_keyboard: [ [
-            { text: "🗑 Delete", callback_data: "q:del:#{quote.id}" },
+            { text: "🏷 Tag", callback_data: "q:tag:#{quote.id}" },
+            { text: "❤️ Fav", callback_data: "fav:toggle:#{quote.id}" },
+            { text: "🗑 Delete", callback_data: "q:del:#{quote.id}" }
+          ], [
             { text: "🎲 Another", callback_data: "q:rand:0" }
           ] ]
         }
@@ -308,6 +375,8 @@ module Bot
         text: presenter.message_text,
         reply_markup: {
           inline_keyboard: [ [
+            { text: "🏷 Tag", callback_data: "q:tag:#{quote.id}" },
+            { text: "❤️ Fav", callback_data: "fav:toggle:#{quote.id}" },
             { text: "🗑 Delete", callback_data: "q:del:#{quote.id}" }
           ], [
             { text: "🔙 Back to list", callback_data: "list:pg:1" }
@@ -316,7 +385,7 @@ module Bot
       )
     end
 
-    def handle_list(update, user, page: 1)
+    def handle_list(update, user, tag_arg: nil, page: 1)
       quotes = user.quotes.order(created_at: :asc)
       total = quotes.count
 
@@ -572,10 +641,25 @@ module Bot
       user.update!(timezone: tz.tzinfo.name, state: nil)
 
       local_now = Time.current.in_time_zone(tz)
-      client.send_message(
-        chat_id: update.chat_id,
-        text: "✅ Timezone set to *#{tz.name}* (#{local_now.strftime('%Z %z')}, local time #{local_now.strftime('%H:%M')})."
-      )
+
+      if old_timezone.nil?
+        client.send_message(
+          chat_id: update.chat_id,
+          text: "✅ You're all set! Timezone: *#{tz.name}* (local #{local_now.strftime('%H:%M')}).\n\n" \
+                "Now send me any quote you love and I'll save it for you. Tap ☰ Menu anytime to see commands.",
+          reply_markup: {
+            inline_keyboard: [ [
+              { text: "✍️ Add my first quote", callback_data: "ob:addfirst" },
+              { text: "📖 Show commands", callback_data: "ob:help" }
+            ] ]
+          }
+        )
+      else
+        client.send_message(
+          chat_id: update.chat_id,
+          text: "✅ Timezone updated to *#{tz.name}* (#{local_now.strftime('%Z %z')}, local time #{local_now.strftime('%H:%M')})."
+        )
+      end
 
       reschedule_all_for(user) if old_timezone != tz.tzinfo.name
     end
@@ -596,6 +680,151 @@ module Bot
 
       client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
       apply_timezone(update, user, zone_names[idx])
+    end
+
+    def handle_timezones(update, user)
+      zones = Bot::TimezoneParser.common_zones
+      lines = zones.map do |tz|
+        now = Time.current.in_time_zone(tz)
+        "#{tz.name} — #{now.strftime('%H:%M')} (#{now.strftime('%Z')})"
+      end
+
+      client.send_message(
+        chat_id: update.chat_id,
+        text: "🌍 *Common timezones:*\n\n#{lines.join("\n")}\n\nUse /settimezone <city or offset> to set yours.",
+        reply_markup: {
+          inline_keyboard: [ [ { text: "🌍 Pick my timezone", callback_data: "ob:tz" } ] ]
+        }
+      )
+    end
+
+    def handle_tag_picker(update, user, quote_id)
+      quote = user.quotes.find_by(id: quote_id)
+      unless quote
+        client.send_message(chat_id: update.chat_id, text: "🤷 That quote's no longer here.")
+        return
+      end
+
+      user_tags = user.tags.order(:name)
+      applied_tag_ids = quote.taggings.pluck(:tag_id).to_set
+
+      buttons = user_tags.map do |tag|
+        applied = applied_tag_ids.include?(tag.id)
+        action = applied ? "tag:rm:#{quote.id}:#{tag.id}" : "tag:add:#{quote.id}:#{tag.id}"
+        label = applied ? "✓ ##{tag.name}" : "##{tag.name}"
+        [ { text: label, callback_data: action } ]
+      end
+      buttons << [ { text: "➕ New tag", callback_data: "tag:new:#{quote.id}" } ]
+      buttons << [ { text: "🔙 Back", callback_data: "q:show:#{quote.id}" } ]
+
+      client.send_message(
+        chat_id: update.chat_id,
+        text: "🏷 Tag this quote:\n\n\"#{quote.content.truncate(100)}\"",
+        reply_markup: { inline_keyboard: buttons }
+      )
+    end
+
+    def handle_tag_add(update, user, quote_id:, tag_id:)
+      quote = user.quotes.find_by(id: quote_id)
+      tag   = user.tags.find_by(id: tag_id)
+
+      unless quote && tag
+        client.answer_callback_query(callback_query_id: update.callback_query_id, text: "Not found.")
+        return
+      end
+
+      quote.taggings.find_or_create_by!(tag: tag)
+      client.answer_callback_query(callback_query_id: update.callback_query_id, text: "✓ Tagged ##{tag.name}")
+      handle_tag_picker(update, user, quote_id)
+    rescue ActiveRecord::RecordNotUnique
+      client.answer_callback_query(callback_query_id: update.callback_query_id, text: "✓ Already tagged")
+    end
+
+    def handle_tag_remove(update, user, quote_id:, tag_id:)
+      quote = user.quotes.find_by(id: quote_id)
+      tag   = user.tags.find_by(id: tag_id)
+
+      unless quote && tag
+        client.answer_callback_query(callback_query_id: update.callback_query_id, text: "Not found.")
+        return
+      end
+
+      quote.taggings.where(tag: tag).destroy_all
+      client.answer_callback_query(callback_query_id: update.callback_query_id, text: "✓ Removed ##{tag.name}")
+      handle_tag_picker(update, user, quote_id)
+    end
+
+    def handle_tag_new(update, user, quote_id)
+      quote = user.quotes.find_by(id: quote_id)
+      unless quote
+        client.answer_callback_query(callback_query_id: update.callback_query_id, text: "Not found.")
+        return
+      end
+      client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
+      Rails.cache.write("pending_tag_quote:#{update.chat_id}", quote_id, expires_in: 10.minutes)
+      user.update!(state: "awaiting_tag_name")
+      client.send_message(
+        chat_id: update.chat_id,
+        text: "🏷 Type the tag name (e.g. stoic, motivation):"
+      )
+    end
+
+    def handle_awaiting_tag_name(update, user, text)
+      quote_id = Rails.cache.read("pending_tag_quote:#{update.chat_id}")
+      unless quote_id
+        user.update!(state: nil)
+        client.send_message(chat_id: update.chat_id, text: "Session expired. Please try tagging again.")
+        return
+      end
+
+      quote = user.quotes.find_by(id: quote_id)
+      unless quote
+        user.update!(state: nil)
+        client.send_message(chat_id: update.chat_id, text: "🤷 That quote's no longer here.")
+        return
+      end
+
+      raw_name = text.strip
+      normalized = raw_name.gsub(/\A#+/, "").downcase.gsub(/\s+/, "_").strip
+
+      if normalized.empty? || normalized !~ /\A[a-z0-9_]+\z/
+        client.send_message(chat_id: update.chat_id,
+          text: "❌ Tag names can only contain letters, numbers, and underscores. Try again:")
+        return
+      end
+
+      begin
+        tag = user.tags.find_or_create_by!(name: normalized)
+      rescue ActiveRecord::RecordNotUnique
+        retry
+      end
+
+      quote.taggings.find_or_create_by!(tag: tag)
+      user.update!(state: nil)
+      Rails.cache.delete("pending_tag_quote:#{update.chat_id}")
+
+      client.send_message(
+        chat_id: update.chat_id,
+        text: "✅ Tagged with *##{tag.name}*",
+        reply_markup: {
+          inline_keyboard: [ [
+            { text: "🏷 Add another tag", callback_data: "q:tag:#{quote.id}" },
+            { text: "🔙 Back to quote", callback_data: "q:show:#{quote.id}" }
+          ] ]
+        }
+      )
+    end
+
+    def handle_fav_toggle(update, user, quote_id)
+      quote = user.quotes.find_by(id: quote_id)
+      unless quote
+        client.answer_callback_query(callback_query_id: update.callback_query_id, text: "Not found.")
+        return
+      end
+
+      quote.update!(favourited: !quote.favourited)
+      toast = quote.favourited ? "❤️ Favourited" : "🤍 Unfavourited"
+      client.answer_callback_query(callback_query_id: update.callback_query_id, text: toast)
     end
 
     def reschedule_all_for(user)

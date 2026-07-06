@@ -13,7 +13,8 @@ class Quote < ApplicationRecord
   scope :by_tag, ->(tag) { joins(:taggings).where(taggings: { tag_id: tag.id }) }
   scope :for_user, ->(user) { where(user_id: user.id) }
 
-  def self.random_for(user)
-    user.quotes.order(Arel.sql("last_delivered_at ASC NULLS FIRST")).first(20).sample
+  def self.random_for(user, tag: nil)
+    scope = tag ? user.quotes.joins(:taggings).where(taggings: { tag_id: tag.id }) : user.quotes
+    scope.order(Arel.sql("last_delivered_at ASC NULLS FIRST")).first(20).sample
   end
 end
