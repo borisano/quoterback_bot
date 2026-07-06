@@ -646,4 +646,13 @@ RSpec.describe Bot::Dispatcher do
       )
     end
   end
+
+  context "with /timezones command" do
+    it "sends a list of common timezones with current local times" do
+      dispatcher.dispatch(parsed_update(text: "/timezones"))
+      expect(client).to have_received(:send_message).with(
+        hash_including(text: a_string_including("timezone"))
+      )
+    end
+  end
 end
