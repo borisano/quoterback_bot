@@ -1,0 +1,28 @@
+<h1>QuoterBack Admin</h1>
+
+<h2>Users</h2>
+<ul>
+  <li>Total: <%= @stats[:users_total] %></li>
+  <li>Active: <%= @stats[:users_active] %></li>
+  <li>With timezone: <%= @stats[:users_with_tz] %></li>
+  <li>With active schedule: <%= @stats[:users_scheduled] %></li>
+</ul>
+
+<h2>Quotes</h2>
+<ul>
+  <li>Total: <%= @stats[:quotes_total] %></li>
+  <li>Tags total: <%= @stats[:tags_total] %></li>
+</ul>
+
+<h2>Deliveries</h2>
+<ul>
+  <li>Today: <%= @stats[:deliveries_today] %></li>
+  <li>All time: <%= @stats[:deliveries_all] %></li>
+</ul>
+
+<h2>Top Authors</h2>
+<ul>
+  <% @stats[:top_authors].each do |author, count| %>
+    <li><%= author %> (<%= count %> quotes)</li>
+  <% end %>
+</ul>
