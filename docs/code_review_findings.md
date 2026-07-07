@@ -124,7 +124,7 @@ In groups (and sometimes via autocomplete in DMs) Telegram sends `/quote@QuoterB
 "Add this as a quote? _/quote@QuoterBackBot_". **Fix:** after splitting, strip a trailing
 `@\S+` from `command` (`command = command.sub(/@[\w_]+\z/, "")`) before the `case`.
 
-### M2. Half-hour/quarter-hour and edge UTC offsets unparseable
+### M2. Half-hour/quarter-hour and edge UTC offsets unparseable ✅ IMPLEMENTED
 `Bot::TimezoneParser` regex `\A(?:UTC)?([+-]\d{1,2})(?::00)?\z` rejects `+5:30` (India — huge
 Telegram population), `+9:30`, `+5:45`, and the map lacks `+13`/`+14`. **Fix:** extend the regex
 to capture minutes `(?::(\d{2}))?`; add `OFFSET_TO_ZONE` entries: `5.5 => "Chennai"`,
