@@ -204,7 +204,7 @@ G5) exist, reply once with "I can only save text quotes right now — send me th
 `message` update has no text. Requires `UpdateParser` to expose a flag (e.g. parse `photo`/
 `document` presence — groundwork G4 needs anyway).
 
-### M14. Missing production boot check for `TELEGRAM_WEBHOOK_SECRET` (plan §13, L1/N2)
+### M14. Missing production boot check for `TELEGRAM_WEBHOOK_SECRET` (plan §13, L1/N2) ✅ IMPLEMENTED
 `config/initializers/` has no `webhook_secret_check.rb` — a prod deploy with the secret unset
 runs with webhook auth silently disabled. Implement exactly per plan §13: raise in production
 boot when blank, guarded by `next if ENV["SECRET_KEY_BASE_DUMMY"].present?` so image builds pass.
