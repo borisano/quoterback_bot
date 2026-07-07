@@ -157,7 +157,7 @@ edit-in-place. **Fix:** give `handle_tag_picker` an `edit:` flag (like `render_l
 initial `q:tag` entry may send a new message, but re-renders after add/remove must
 `edit_message_text` on `update.message_id`. (Note: after C6's fix, identical re-renders are safe.)
 
-### M7. `qc:no` (and picker/cache flows) skip the `from_id` ownership check
+### M7. `qc:no` (and picker/cache flows) skip the `from_id` ownership check ✅ IMPLEMENTED
 `handle_quote_confirm_no` deletes the pending entry with no ownership check — in a group, anyone
 can dismiss another member's pending quote. **Fix:** same `entry[:from_id] == update.from_id`
 guard as the yes-path (read entry before deleting; if entry is nil just answer the callback).

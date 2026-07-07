@@ -294,6 +294,14 @@ module Bot
     end
 
     def handle_quote_confirm_no(update, user, token)
+      entry = Rails.cache.read("pending_quote:#{token}")
+      # Only the sender who created the pending quote may dismiss it (M7).
+      if entry && entry[:from_id] != update.from_id
+        client.answer_callback_query(callback_query_id: update.callback_query_id,
+          text: "This isn't your quote confirmation.")
+        return
+      end
+
       Rails.cache.delete("pending_quote:#{token}")
       client.answer_callback_query(callback_query_id: update.callback_query_id, text: "👍 Dismissed")
     end

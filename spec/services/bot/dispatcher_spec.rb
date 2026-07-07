@@ -535,6 +535,31 @@ RSpec.describe Bot::Dispatcher do
         end
       end
 
+      context "qc:no:<token> ownership (M7)" do
+        let(:token) { "othersno" }
+
+        before do
+          Rails.cache.write("pending_quote:#{token}", { from_id: 999, chat_id: 111, text: "Not yours." })
+        end
+
+        it "does not delete another user's pending entry" do
+          dispatcher.dispatch(parsed_update(callback_data: "qc:no:#{token}", callback_query_id: "cqno", from_id: 111))
+          expect(Rails.cache.read("pending_quote:#{token}")).not_to be_nil
+        end
+
+        it "still answers the callback query" do
+          dispatcher.dispatch(parsed_update(callback_data: "qc:no:#{token}", callback_query_id: "cqno", from_id: 111))
+          expect(client).to have_received(:answer_callback_query).with(
+            hash_including(callback_query_id: "cqno")
+          )
+        end
+
+        it "lets the real owner dismiss their own entry" do
+          dispatcher.dispatch(parsed_update(callback_data: "qc:no:#{token}", callback_query_id: "cqno", from_id: 999))
+          expect(Rails.cache.read("pending_quote:#{token}")).to be_nil
+        end
+      end
+
       context "q:dely:<id>" do
         let!(:quote) { create(:quote, user: user) }
 
