@@ -64,4 +64,22 @@ namespace :bot do
     TelegramClient.from_env.send_message(chat_id: chat_id, text: "🏓 Pong! (manual ping)")
     puts "✅ Ping sent to chat_id #{chat_id}"
   end
+
+  desc "Send a random quote to a user now (usage: rails 'bot:quote_now[chat_id]')"
+  task :quote_now, [ :chat_id ] => :environment do |_, args|
+    chat_id = args[:chat_id]&.to_i
+    abort "Usage: rails 'bot:quote_now[TELEGRAM_CHAT_ID]'" unless chat_id
+
+    user = User.find_by(telegram_chat_id: chat_id)
+    abort "No user with chat_id #{chat_id}" unless user
+
+    quote = Quote.random_for(user)
+    abort "User #{chat_id} has no quotes to send" unless quote
+
+    TelegramClient.from_env.send_message(
+      chat_id: chat_id,
+      text: Bot::QuotePresenter.new(quote).message_text
+    )
+    puts "✅ Quote ##{quote.id} sent to chat_id #{chat_id}"
+  end
 end

@@ -260,11 +260,12 @@ fixer should confirm with the author which are in scope now. Ordered by user imp
    but is never shown to anyone.
 10. **Typed-id fallback commands** `/tag`, `/untag`, `/fav`, `/unfav` (plan §8.5.3) — plan calls
     them optional power-user fallbacks; lowest priority.
-11. **Minor plan deltas:** `bot:quote_now[chat_id]` rake task missing (only `ping_now` exists);
-    `/list` empty state lacks the `[📥 Import] [🎲 Example]` buttons (UX12); expired-confirm lacks
-    "✍️ Add anyway" (§8.5.6); first-capture success card mentions scheduling but offers no
-    `⏰ Set daily time` button (UX5 — blocked on G1's `sched:new`); no `.kamal/hooks/pre-app-boot`
-    (harmless: `bin/docker-entrypoint` runs `db:prepare`).
+11. **Minor plan deltas:** `bot:quote_now[chat_id]` rake task ✅ **IMPLEMENTED**. The rest are
+    intentionally deferred (would dead-end or are blocked): `/list` empty state `[📥 Import]
+    [🎲 Example]` buttons (UX12 — those features don't exist yet); expired-confirm "✍️ Add anyway"
+    (§8.5.6 — cached text is gone once the TTL elapses); first-capture `⏰ Set daily time` (UX5 —
+    blocked on G1's `sched:new`); `.kamal/hooks/pre-app-boot` (redundant — `bin/docker-entrypoint`
+    already runs `db:prepare`).
 
 ---
 
