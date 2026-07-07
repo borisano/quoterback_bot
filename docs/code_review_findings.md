@@ -172,7 +172,7 @@ normalization (`sub(/\A#+/, "")`, `downcase`, `strip`, `gsub(/\s+/, "_")`) into 
 single `Tag.normalize(raw)` helper for lookups instead of three inline copies
 (`handle_quote`, `resolve_list_tag`, `handle_awaiting_tag_name`).
 
-### M9. `/start` payload is captured then ignored
+### M9. `/start` payload is captured then ignored ✅ IMPLEMENTED
 `handle_start(update, user, rest.presence)` accepts the deep-link payload and does nothing with
 it. Plan §18.2.5: a `q_<public_id>` payload must answer "Shared quotes are coming soon!" (any
 other unknown payload: ignore). One `if payload&.start_with?("q_")` branch.

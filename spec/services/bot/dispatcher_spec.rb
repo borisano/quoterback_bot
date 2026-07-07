@@ -1186,6 +1186,20 @@ RSpec.describe Bot::Dispatcher do
         hash_including(text: a_string_including("Welcome"))
       )
     end
+
+    it "acknowledges a q_ share payload as coming soon (M9)" do
+      dispatcher.dispatch(parsed_update(text: "/start q_abc123"))
+      expect(client).to have_received(:send_message).with(
+        hash_including(text: a_string_including("coming soon"))
+      )
+    end
+
+    it "ignores an unknown payload (no coming-soon note) (M9)" do
+      dispatcher.dispatch(parsed_update(text: "/start somethingelse"))
+      expect(client).not_to have_received(:send_message).with(
+        hash_including(text: a_string_including("coming soon"))
+      )
+    end
   end
 
   context "with ob:addfirst callback" do

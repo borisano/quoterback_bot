@@ -171,6 +171,13 @@ module Bot
     def handle_start(update, user, payload = nil)
       user.update!(state: "new") unless user.state == "ready"
 
+      # Reserved deep-link for the future public-sharing feature (plan §18.2.5):
+      # acknowledge a q_<public_id> payload so a leaked share link doesn't look
+      # broken. Unknown payloads are ignored (M9).
+      if payload&.start_with?("q_")
+        client.send_message(chat_id: update.chat_id, text: "🔗 Shared quotes are coming soon!")
+      end
+
       greeting = user.first_name.present? ? "Hey #{user.first_name}!" : "Hey there!"
 
       client.send_message(
