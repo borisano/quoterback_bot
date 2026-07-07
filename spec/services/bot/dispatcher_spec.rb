@@ -863,6 +863,24 @@ RSpec.describe Bot::Dispatcher do
         ))
       )
     end
+
+    it "shows a 'no longer here' card when the quote is gone (M5)" do
+      dispatcher.dispatch(parsed_update(callback_data: "q:show:999999", callback_query_id: "cs3"))
+      expect(client).to have_received(:edit_message_text).with(
+        hash_including(text: a_string_including("no longer here"))
+      )
+    end
+
+    it "offers a 'See your list' button on the deleted-quote card (M5)" do
+      dispatcher.dispatch(parsed_update(callback_data: "q:show:999999", callback_query_id: "cs4"))
+      expect(client).to have_received(:edit_message_text).with(
+        hash_including(reply_markup: hash_including(
+          inline_keyboard: array_including(
+            array_including(hash_including(callback_data: "list:pg:1"))
+          )
+        ))
+      )
+    end
   end
 
   context "with q:rand:<schedule_id> callback (C5 — scoped 'Another')" do

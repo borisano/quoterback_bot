@@ -403,7 +403,16 @@ module Bot
 
     def handle_quote_show(update, user, quote_id, page: 1, tag_id: nil)
       quote = user.quotes.find_by(id: quote_id)
-      return unless quote
+      unless quote
+        # Don't leave the tap looking like a no-op (M5).
+        client.edit_message_text(
+          chat_id: update.chat_id,
+          message_id: update.message_id,
+          text: "🤷 That quote's no longer here.",
+          reply_markup: { inline_keyboard: [ [ { text: "📋 See your list", callback_data: "list:pg:1" } ] ] }
+        )
+        return
+      end
 
       # Return the user to the exact page and tag filter they came from (M4).
       back_target = "list:pg:#{page}#{tag_id ? ":#{tag_id}" : ''}"

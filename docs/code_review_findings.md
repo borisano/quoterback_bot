@@ -145,7 +145,7 @@ detail card returns to page 1, unfiltered. **Fix:** thread `page` and `tag_id` t
 `q:show` callback data (e.g. `q:show:<id>:<page>:<tag_id?>` — still well under 64 bytes) and
 build the back button from them; number buttons in `render_list` already know both.
 
-### M5. `q:show` on a deleted quote gives no feedback
+### M5. `q:show` on a deleted quote gives no feedback ✅ IMPLEMENTED
 `handle_quote_show` does `return unless quote` after the spinner was cleared — the tap appears to
 do nothing. **Fix:** `edit_message_text` to the standard "🤷 That quote's no longer here." card
 with a `[📋 See your list]` button (pattern already exists in `handle_delete_confirm_callback`).
