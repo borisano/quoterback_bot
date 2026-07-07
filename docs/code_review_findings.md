@@ -177,7 +177,7 @@ single `Tag.normalize(raw)` helper for lookups instead of three inline copies
 it. Plan §18.2.5: a `q_<public_id>` payload must answer "Shared quotes are coming soon!" (any
 other unknown payload: ignore). One `if payload&.start_with?("q_")` branch.
 
-### M10. "ready" state and helpers are dead; `/start` semantics fuzzy
+### M10. "ready" state and helpers are dead; `/start` semantics fuzzy ✅ IMPLEMENTED
 `STATES` includes `ready` but nothing ever sets it; `User#configured?`/`#awaiting_state?` are
 unused; `handle_start` guards `unless user.state == "ready"` — a condition that can never be
 true. Per plan §11 the terminal onboarding confirmation (first successful `apply_timezone`)

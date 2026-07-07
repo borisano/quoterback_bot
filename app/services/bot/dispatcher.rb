@@ -708,7 +708,8 @@ module Bot
       end
 
       old_timezone = user.timezone
-      user.update!(timezone: tz.tzinfo.name, state: nil)
+      # Setting a timezone completes onboarding — mark the user ready (M10).
+      user.update!(timezone: tz.tzinfo.name, state: "ready")
 
       local_now = Time.current.in_time_zone(tz)
 

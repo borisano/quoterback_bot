@@ -742,9 +742,9 @@ RSpec.describe Bot::Dispatcher do
       expect(user.reload.timezone).to eq("Europe/London")
     end
 
-    it "clears the state after setting timezone" do
+    it "moves the user to the 'ready' state after setting timezone (M10)" do
       dispatcher.dispatch(parsed_update(text: "London"))
-      expect(user.reload.state).to be_nil
+      expect(user.reload.state).to eq("ready")
     end
 
     it "does NOT trigger confirm-on-text" do
@@ -759,6 +759,33 @@ RSpec.describe Bot::Dispatcher do
       expect(client).to have_received(:send_message).with(
         hash_including(text: "🏓 Pong!")
       )
+    end
+  end
+
+  context "reaching the ready state after onboarding (M10)" do
+    it "sets state to 'ready' after the first timezone is set via awaiting_timezone" do
+      user.update!(timezone: nil, state: "awaiting_timezone")
+      dispatcher.dispatch(parsed_update(text: "London"))
+      expect(user.reload.state).to eq("ready")
+    end
+
+    it "sets state to 'ready' after /settimezone" do
+      user.update!(timezone: nil)
+      dispatcher.dispatch(parsed_update(text: "/settimezone London"))
+      expect(user.reload.state).to eq("ready")
+    end
+
+    it "treats a ready user like a normal user for commands" do
+      user.update!(timezone: "Europe/London", state: "ready")
+      create(:quote, user: user)
+      dispatcher.dispatch(parsed_update(text: "/quote"))
+      expect(client).to have_received(:send_message).with(hash_including(chat_id: 111))
+    end
+
+    it "does not reset a ready user back to 'new' on /start" do
+      user.update!(state: "ready")
+      dispatcher.dispatch(parsed_update(text: "/start"))
+      expect(user.reload.state).to eq("ready")
     end
   end
 
