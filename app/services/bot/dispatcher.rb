@@ -96,7 +96,9 @@ module Bot
       when "/schedule"                     then handle_schedule_command(update, user, rest)
       when "/cancel"                       then # already handled above
       else
-        if text.match?(/ping me in/i)
+        # Anchor at the start so a quote merely containing "ping me in" isn't
+        # hijacked by the easter egg (M12).
+        if text.match?(/\Aping me in\b/i)
           return handle_schedule_ping(update)
         end
         handle_confirm_on_text(update, user, text) unless text.start_with?("/")

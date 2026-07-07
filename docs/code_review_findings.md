@@ -192,7 +192,7 @@ With no active state, `/cancel` disables **all** schedules. Plan UX23 explicitly
 stop delivery — **keep the behaviour for now**, but when G1 lands, `/cancel` with no state should
 become "Nothing to cancel. Manage deliveries in /schedules." Leave a TODO referencing UX23.
 
-### M12. A quote containing "ping me in" can never be saved
+### M12. A quote containing "ping me in" can never be saved ✅ IMPLEMENTED
 The easter-egg branch `text.match?(/ping me in/i)` runs before confirm-on-text, so any plain
 message containing that substring triggers PingJob instead of the save prompt. Tighten to an
 anchored match (`/\Aping me in\s+\d+/i`) or drop the easter egg.

@@ -144,6 +144,27 @@ RSpec.describe Bot::Dispatcher do
       end
     end
 
+    context "'ping me in' only triggers when anchored at the start (M12)" do
+      it "treats a mid-sentence 'ping me in' as a quote candidate" do
+        dispatcher.dispatch(parsed_update(text: "Remember to ping me in the morning"))
+        expect(client).to have_received(:send_message).with(
+          hash_including(text: a_string_including("Add this as a quote"))
+        )
+      end
+
+      it "does not enqueue a PingJob for a mid-sentence match" do
+        expect {
+          dispatcher.dispatch(parsed_update(text: "note to self: ping me in a while"))
+        }.not_to have_enqueued_job(PingJob)
+      end
+
+      it "still triggers for a leading 'ping me in N minutes'" do
+        expect {
+          dispatcher.dispatch(parsed_update(text: "ping me in 3 minutes"))
+        }.to have_enqueued_job(PingJob).with(111, 3)
+      end
+    end
+
     context "with /add command" do
       context "with quote text inline" do
         it "creates a quote and confirms" do
