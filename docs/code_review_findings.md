@@ -134,7 +134,7 @@ the hash by float hours. Also worth a tiny alias map for top cities Rails doesn'
 (`"new york" => "Eastern Time (US & Canada)"`, `"los angeles" => "Pacific Time (US & Canada)"`,
 `"kyiv"/"kiev"`, `"berlin"`, `"toronto"`) — cheap, high-value.
 
-### M3. Invalid-timezone reply arrives in the wrong order
+### M3. Invalid-timezone reply arrives in the wrong order ✅ IMPLEMENTED
 `apply_timezone` (dispatcher.rb:630) sends the **picker first, then** the "Couldn't recognize…"
 explanation, so the user sees the error *below* the picker. Swap the two calls (error message
 first, picker second).

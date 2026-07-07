@@ -686,6 +686,17 @@ RSpec.describe Bot::Dispatcher do
           hash_including(reply_markup: hash_including(:inline_keyboard))
         )
       end
+
+      it "sends the error message BEFORE the picker (M3 — correct order)" do
+        sent = []
+        allow(client).to receive(:send_message) { |args| sent << args[:text] }
+        dispatcher.dispatch(parsed_update(text: "/settimezone notazone"))
+        error_idx  = sent.index { |t| t.include?("Couldn't recognize") }
+        picker_idx = sent.index { |t| t.include?("Choose your timezone") }
+        expect(error_idx).not_to be_nil
+        expect(picker_idx).not_to be_nil
+        expect(error_idx).to be < picker_idx
+      end
     end
 
     context "bare /settimezone" do
