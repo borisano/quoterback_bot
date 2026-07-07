@@ -139,7 +139,7 @@ the hash by float hours. Also worth a tiny alias map for top cities Rails doesn'
 explanation, so the user sees the error *below* the picker. Swap the two calls (error message
 first, picker second).
 
-### M4. `q:show` "Back to list" loses pagination and tag context
+### M4. `q:show` "Back to list" loses pagination and tag context ✅ IMPLEMENTED
 `handle_quote_show` hardcodes `list:pg:1`. A user on page 4 of a tag-filtered list who opens a
 detail card returns to page 1, unfiltered. **Fix:** thread `page` and `tag_id` through the
 `q:show` callback data (e.g. `q:show:<id>:<page>:<tag_id?>` — still well under 64 bytes) and

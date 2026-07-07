@@ -121,9 +121,9 @@ module Bot
         handle_quote_confirm_no(update, user, $1)
       when /\Aq:rand:(\d+)\z/
         handle_quote_random_callback(update, user, $1.to_i)
-      when /\Aq:show:(\d+)\z/
+      when /\Aq:show:(\d+)(?::(\d+))?(?::(\d+))?\z/
         client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
-        handle_quote_show(update, user, $1.to_i)
+        handle_quote_show(update, user, $1.to_i, page: ($2 || 1).to_i, tag_id: $3&.to_i)
       when /\Aq:del:(\d+)\z/
         client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
         handle_delete_confirm_callback(update, user, $1.to_i)
@@ -401,9 +401,12 @@ module Bot
       quote.update!(times_delivered: quote.times_delivered + 1, last_delivered_at: Time.current)
     end
 
-    def handle_quote_show(update, user, quote_id)
+    def handle_quote_show(update, user, quote_id, page: 1, tag_id: nil)
       quote = user.quotes.find_by(id: quote_id)
       return unless quote
+
+      # Return the user to the exact page and tag filter they came from (M4).
+      back_target = "list:pg:#{page}#{tag_id ? ":#{tag_id}" : ''}"
 
       presenter = Bot::QuotePresenter.new(quote)
       client.edit_message_text(
@@ -416,7 +419,7 @@ module Bot
             { text: "❤️ Fav", callback_data: "fav:toggle:#{quote.id}" },
             { text: "🗑 Delete", callback_data: "q:del:#{quote.id}" }
           ], [
-            { text: "🔙 Back to list", callback_data: "list:pg:1" }
+            { text: "🔙 Back to list", callback_data: back_target }
           ] ]
         }
       )
@@ -491,7 +494,8 @@ module Bot
       tag_suffix = tag ? ":#{tag.id}" : ""
 
       number_buttons = page_quotes.each_with_index.map do |q, i|
-        { text: "#{offset + i + 1}", callback_data: "q:show:#{q.id}" }
+        # Carry the current page + tag so the detail card can navigate back (M4).
+        { text: "#{offset + i + 1}", callback_data: "q:show:#{q.id}:#{page}#{tag_suffix}" }
       end
       # Telegram caps inline-keyboard rows at 8 buttons; split into rows of 5 (C1).
       number_rows = number_buttons.each_slice(5).to_a

@@ -340,7 +340,7 @@ RSpec.describe Bot::Dispatcher do
         it "still exposes every quote as a numbered button" do
           create_list(:quote, 10, user: user)
           show_ids = captured_keyboard.flatten.filter_map do |btn|
-            btn[:callback_data][/\Aq:show:(\d+)\z/, 1]&.to_i
+            btn[:callback_data][/\Aq:show:(\d+)/, 1]&.to_i
           end
           expect(show_ids.size).to eq(10)
         end
@@ -825,6 +825,43 @@ RSpec.describe Bot::Dispatcher do
     it "calls QuoteScheduler.cancel_pending_for" do
       dispatcher.dispatch(parsed_update(text: "/cancel"))
       expect(QuoteScheduler).to have_received(:cancel_pending_for)
+    end
+  end
+
+  context "q:show detail card back-navigation (M4)" do
+    let!(:tag) { create(:tag, user: user, name: "stoic") }
+    let!(:quotes) { create_list(:quote, 12, user: user) }
+    before { quotes.each { |q| q.taggings.create!(tag: tag) } }
+
+    it "number buttons carry the current page and tag through q:show" do
+      captured = nil
+      allow(client).to receive(:send_message) { |args| captured = args }
+      dispatcher.dispatch(parsed_update(text: "/list #stoic"))
+      show_btns = captured[:reply_markup][:inline_keyboard].flatten
+                          .select { |b| b[:callback_data].to_s.start_with?("q:show:") }
+      expect(show_btns.first[:callback_data]).to match(/\Aq:show:\d+:1:#{tag.id}\z/)
+    end
+
+    it "detail card 'Back to list' returns to the same page and tag" do
+      dispatcher.dispatch(parsed_update(callback_data: "q:show:#{quotes.first.id}:2:#{tag.id}", callback_query_id: "cs1"))
+      expect(client).to have_received(:edit_message_text).with(
+        hash_including(reply_markup: hash_including(
+          inline_keyboard: array_including(
+            array_including(hash_including(callback_data: "list:pg:2:#{tag.id}"))
+          )
+        ))
+      )
+    end
+
+    it "defaults to page 1 and no tag for a bare q:show:<id>" do
+      dispatcher.dispatch(parsed_update(callback_data: "q:show:#{quotes.first.id}", callback_query_id: "cs2"))
+      expect(client).to have_received(:edit_message_text).with(
+        hash_including(reply_markup: hash_including(
+          inline_keyboard: array_including(
+            array_including(hash_including(callback_data: "list:pg:1"))
+          )
+        ))
+      )
     end
   end
 
