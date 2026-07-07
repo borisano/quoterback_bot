@@ -15,6 +15,7 @@ class ScheduleQuotesJob < ApplicationJob
         QuoteScheduler.schedule_for(schedule)
       rescue => e
         Rails.logger.error("[ScheduleQuotesJob] error scheduling #{schedule.id}: #{e.message}")
+        Rollbar.error(e, schedule_id: schedule.id)
       end
   end
 end

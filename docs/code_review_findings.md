@@ -101,7 +101,7 @@ Nothing handles Telegram's `Bad Request: message is not modified`. Two real trig
 `e.message.include?("message is not modified")` and **return nil silently** (only for that
 error). That fixes every call site at once and matches the plan's "handle silently" instruction.
 
-### C7. `Dispatcher#dispatch`'s blanket rescue hides everything and never reports to Rollbar
+### C7. `Dispatcher#dispatch`'s blanket rescue hides everything and never reports to Rollbar ✅ IMPLEMENTED
 `dispatcher.rb:21`: `rescue StandardError` → `Rails.logger.error` only. Consequences: (a) every
 bug above is invisible to the user *and* to Rollbar (the initializer exists but only captures
 unhandled exceptions — these are handled); (b) a failure inside a **callback** handler leaves the

@@ -32,6 +32,39 @@ RSpec.describe Bot::Dispatcher do
       end
     end
 
+    context "when a handler raises (C7 — error policy)" do
+      before { allow(User).to receive(:find_or_create_from_update!).and_raise(StandardError, "boom") }
+
+      it "does not propagate the error" do
+        expect { dispatcher.dispatch(parsed_update(text: "/quote")) }.not_to raise_error
+      end
+
+      it "reports the exception to Rollbar" do
+        allow(Rollbar).to receive(:error)
+        dispatcher.dispatch(parsed_update(text: "/quote"))
+        expect(Rollbar).to have_received(:error)
+      end
+
+      it "clears the callback spinner when the failing update was a callback" do
+        dispatcher.dispatch(parsed_update(callback_data: "q:rand:0", callback_query_id: "cqX"))
+        expect(client).to have_received(:answer_callback_query).with(
+          hash_including(callback_query_id: "cqX")
+        )
+      end
+
+      it "does not try to answer a callback for a plain text update" do
+        dispatcher.dispatch(parsed_update(text: "/quote"))
+        expect(client).not_to have_received(:answer_callback_query)
+      end
+
+      it "still swallows a failure inside the rescue's callback answer" do
+        allow(client).to receive(:answer_callback_query).and_raise(StandardError, "client down")
+        expect {
+          dispatcher.dispatch(parsed_update(callback_data: "q:rand:0", callback_query_id: "cqX"))
+        }.not_to raise_error
+      end
+    end
+
     context "with /ping command" do
       it "sends 'Pong!' back to the user" do
         dispatcher.dispatch(parsed_update(text: "/ping"))

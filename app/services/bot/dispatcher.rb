@@ -20,6 +20,18 @@ module Bot
       end
     rescue StandardError => e
       Rails.logger.error("[Bot::Dispatcher] Error: #{e.class} — #{e.message}")
+      Rollbar.error(e, chat_id: update&.chat_id)
+      # Clear the button spinner so a failed callback tap doesn't hang forever.
+      if update&.callback_query_id.present?
+        begin
+          client.answer_callback_query(
+            callback_query_id: update.callback_query_id,
+            text: "Something went wrong — try again"
+          )
+        rescue StandardError
+          nil
+        end
+      end
     end
 
     private
@@ -864,6 +876,7 @@ module Bot
         QuoteScheduler.schedule_for(schedule)
       rescue => e
         Rails.logger.error("[Dispatcher] reschedule error for schedule #{schedule.id}: #{e.message}")
+        Rollbar.error(e, schedule_id: schedule.id)
       end
     end
 

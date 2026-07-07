@@ -25,6 +25,7 @@ module Bot
         @dispatcher.dispatch(parsed)
       rescue StandardError => e
         Rails.logger.error("[Bot::Poller] error: #{e.class}: #{e.message}")
+        Rollbar.error(e)
       end
     rescue SignalException, Interrupt
       # Graceful shutdown — foreman sends SIGTERM, Ctrl-C sends SIGINT.

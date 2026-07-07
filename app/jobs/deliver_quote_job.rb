@@ -6,6 +6,7 @@ class DeliverQuoteJob < ApplicationJob
   # when declared for the same class, defeating retries entirely).
   retry_on TelegramClient::Error, wait: 30.seconds, attempts: 3 do |job, error|
     Rails.logger.error("[DeliverQuoteJob] exhausted retries for schedule #{job.arguments.first}: #{error.message}")
+    Rollbar.error(error, schedule_id: job.arguments.first)
     schedule = DeliverySchedule.find_by(id: job.arguments.first)
     QuoteScheduler.schedule_for(schedule) if schedule
   end
@@ -73,6 +74,7 @@ class DeliverQuoteJob < ApplicationJob
     Rails.logger.info("[DeliverQuoteJob] delivery already logged for schedule #{schedule.id} on #{local_date}")
   rescue => e
     Rails.logger.error("[DeliverQuoteJob] post-send bookkeeping error: #{e.class} — #{e.message}")
+    Rollbar.error(e)
   end
 
   def update_streak(user, local_date)
@@ -92,5 +94,6 @@ class DeliverQuoteJob < ApplicationJob
     QuoteScheduler.schedule_for(schedule)
   rescue => e
     Rails.logger.error("[DeliverQuoteJob] reschedule failed: #{e.class} — #{e.message}")
+    Rollbar.error(e)
   end
 end
