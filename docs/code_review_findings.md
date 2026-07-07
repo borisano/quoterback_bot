@@ -239,7 +239,7 @@ fixer should confirm with the author which are in scope now. Ordered by user imp
    `/cancel` (M11). Multi-schedule + per-tag schedules are fully supported by the engine/schema
    but unreachable from the UI (`/schedule` always reuses `first_or_initialize`, `tag_id` always
    nil).
-2. **`/settings` buttons are all dead**: every `set:*` callback answers "🚧 Coming soon!". Cheap
+2. ✅ IMPLEMENTED (set:tz) — **`/settings` buttons are all dead**: every `set:*` callback answers "🚧 Coming soon!". Cheap
    partial win now: wire `set:tz` → `show_timezone_picker` (handler exists) even if the rest wait.
 3. **`q:bytag` is a dead path**: the callback handler exists (dispatcher.rb:125) but **nothing
    ever renders a `q:bytag` button** (plan §9.1: bare `/quote` should offer a top-tags row).

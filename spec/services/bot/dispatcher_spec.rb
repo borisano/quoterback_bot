@@ -1264,6 +1264,31 @@ RSpec.describe Bot::Dispatcher do
     end
   end
 
+  context "with set:tz callback (G2)" do
+    it "opens the timezone picker" do
+      dispatcher.dispatch(parsed_update(callback_data: "set:tz", callback_query_id: "st1"))
+      expect(client).to have_received(:send_message).with(
+        hash_including(text: a_string_including("Choose your timezone"))
+      )
+    end
+
+    it "answers the callback query" do
+      dispatcher.dispatch(parsed_update(callback_data: "set:tz", callback_query_id: "st1"))
+      expect(client).to have_received(:answer_callback_query).with(
+        hash_including(callback_query_id: "st1")
+      )
+    end
+  end
+
+  context "with an unimplemented set:* callback" do
+    it "still answers with a coming-soon toast" do
+      dispatcher.dispatch(parsed_update(callback_data: "set:stats", callback_query_id: "ss1"))
+      expect(client).to have_received(:answer_callback_query).with(
+        hash_including(callback_query_id: "ss1", text: a_string_including("Coming soon"))
+      )
+    end
+  end
+
   context "with ob:addfirst callback" do
     it "sets state to awaiting_quote_text" do
       dispatcher.dispatch(parsed_update(callback_data: "ob:addfirst", callback_query_id: "ob1"))

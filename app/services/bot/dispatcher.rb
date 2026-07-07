@@ -169,6 +169,9 @@ module Bot
         client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
         user.update!(state: "awaiting_timezone")
         client.send_message(chat_id: update.chat_id, text: "⌨️ Type your city, country, or UTC offset (e.g. London, +9, UTC-5):")
+      when /\Aset:tz\z/
+        client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
+        show_timezone_picker(update, user)
       when /\Aset:(.+)\z/
         client.answer_callback_query(callback_query_id: update.callback_query_id, text: "🚧 Coming soon!")
       else
