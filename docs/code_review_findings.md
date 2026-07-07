@@ -241,7 +241,7 @@ fixer should confirm with the author which are in scope now. Ordered by user imp
    nil).
 2. ✅ IMPLEMENTED (set:tz) — **`/settings` buttons are all dead**: every `set:*` callback answers "🚧 Coming soon!". Cheap
    partial win now: wire `set:tz` → `show_timezone_picker` (handler exists) even if the rest wait.
-3. **`q:bytag` is a dead path**: the callback handler exists (dispatcher.rb:125) but **nothing
+3. ✅ IMPLEMENTED — **`q:bytag` is a dead path**: the callback handler exists (dispatcher.rb:125) but **nothing
    ever renders a `q:bytag` button** (plan §9.1: bare `/quote` should offer a top-tags row).
    Either render the row or note the handler is forward-wiring.
 4. **Images** (plan §6.6): no photo/document extraction in `UpdateParser`, no confirm-on-photo,

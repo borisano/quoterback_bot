@@ -372,19 +372,27 @@ module Bot
         return
       end
 
+      keyboard = [
+        [
+          { text: "🏷 Tag", callback_data: "q:tag:#{quote.id}" },
+          { text: "❤️ Fav", callback_data: "fav:toggle:#{quote.id}" },
+          { text: "🗑 Delete", callback_data: "q:del:#{quote.id}" }
+        ],
+        [ { text: "🎲 Another", callback_data: "q:rand:0" } ]
+      ]
+
+      # On a bare /quote, offer a row of the user's top tags so they can pick a
+      # tag without typing (G3 — wires the q:bytag handler).
+      if tag.nil?
+        tag_row = top_tags_for(user).map { |t| { text: "##{t.name}", callback_data: "q:bytag:#{t.id}" } }
+        keyboard << tag_row if tag_row.any?
+      end
+
       presenter = Bot::QuotePresenter.new(quote)
       client.send_message(
         chat_id: update.chat_id,
         text: presenter.message_text,
-        reply_markup: {
-          inline_keyboard: [ [
-            { text: "🏷 Tag", callback_data: "q:tag:#{quote.id}" },
-            { text: "❤️ Fav", callback_data: "fav:toggle:#{quote.id}" },
-            { text: "🗑 Delete", callback_data: "q:del:#{quote.id}" }
-          ], [
-            { text: "🎲 Another", callback_data: "q:rand:0" }
-          ] ]
-        }
+        reply_markup: { inline_keyboard: keyboard }
       )
 
       user.quote_deliveries.create!(
@@ -394,6 +402,16 @@ module Bot
         delivered_at: Time.current
       )
       quote.update!(times_delivered: quote.times_delivered + 1, last_delivered_at: Time.current)
+    end
+
+    # The user's most-used tags (for the bare-/quote picker row, G3).
+    def top_tags_for(user, limit: 3)
+      user.tags
+          .left_joins(:taggings)
+          .group("tags.id")
+          .order(Arel.sql("COUNT(taggings.id) DESC"))
+          .order(:name)
+          .limit(limit)
     end
 
     def handle_quote_random_callback(update, user, schedule_id = 0)

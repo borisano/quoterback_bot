@@ -1215,6 +1215,45 @@ RSpec.describe Bot::Dispatcher do
     end
   end
 
+  context "bare /quote renders a top-tags row (G3)" do
+    let!(:tag) { create(:tag, user: user, name: "stoic") }
+    let!(:quote) { create(:quote, user: user) }
+    before { quote.taggings.create!(tag: tag) }
+
+    it "includes a q:bytag button for the user's tag" do
+      dispatcher.dispatch(parsed_update(text: "/quote"))
+      expect(client).to have_received(:send_message).with(
+        hash_including(reply_markup: hash_including(
+          inline_keyboard: array_including(
+            array_including(hash_including(callback_data: "q:bytag:#{tag.id}"))
+          )
+        ))
+      )
+    end
+
+    it "does not render a tag row when the user has no tags" do
+      tag.destroy
+      captured = nil
+      allow(client).to receive(:send_message) { |args| captured = args }
+      dispatcher.dispatch(parsed_update(text: "/quote"))
+      buttons = captured[:reply_markup][:inline_keyboard].flatten
+      expect(buttons.map { |b| b[:callback_data] }).not_to include(a_string_starting_with("q:bytag:"))
+    end
+
+    it "does not add a tag row when already filtering by a tag" do
+      captured = nil
+      allow(client).to receive(:send_message) { |args| captured = args }
+      dispatcher.dispatch(parsed_update(text: "/quote #stoic"))
+      buttons = captured[:reply_markup][:inline_keyboard].flatten
+      expect(buttons.map { |b| b[:callback_data] }).not_to include(a_string_starting_with("q:bytag:"))
+    end
+
+    it "routes a q:bytag tap to a quote from that tag" do
+      dispatcher.dispatch(parsed_update(callback_data: "q:bytag:#{tag.id}", callback_query_id: "bt1"))
+      expect(client).to have_received(:send_message).with(hash_including(chat_id: 111))
+    end
+  end
+
   context "with /quote bare-word that is not an existing tag" do
     it "falls back to random quote, NOT 'empty tag' (issue N11)" do
       create(:quote, user: user)
