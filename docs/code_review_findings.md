@@ -90,7 +90,7 @@ whole-collection behaviour. Extract the shared "select quote for scope" logic so
 dispatcher use one implementation (the job additionally applies favourite weighting — move
 `weighted_sample` into `Quote.random_for` or a shared module rather than duplicating).
 
-### C6. `edit_message_text` "message is not modified" is not swallowed (plan §15 requires it)
+### C6. `edit_message_text` "message is not modified" is not swallowed (plan §15 requires it) ✅ IMPLEMENTED
 Nothing handles Telegram's `Bad Request: message is not modified`. Two real triggers:
 - `🎲 Another` when the user has 1 quote (or the LRU pool re-picks the same quote): the edit has
   identical text → 400 → `TelegramClient::Error` → aborts `handle_quote_random_callback`

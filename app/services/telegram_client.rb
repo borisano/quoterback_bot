@@ -26,6 +26,11 @@ class TelegramClient
     @api.public_send(name, params)
   rescue Telegram::Bot::Exceptions::ResponseError => e
     raise Forbidden, e.message if e.response.status == 403
+    # Editing a message to identical content is a no-op error (e.g. re-tapping
+    # the current page, or "Another" re-picking the same quote). Swallow it so
+    # callers don't abort mid-handler (C6).
+    return nil if e.message.include?("message is not modified")
+
     raise Error, e.message
   end
 
