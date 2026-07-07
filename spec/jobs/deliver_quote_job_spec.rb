@@ -41,18 +41,20 @@ RSpec.describe DeliverQuoteJob, type: :job do
       end
     end
 
-    describe "#weighted_sample (favourite weighting)" do
-      it "gives favourited quotes a higher weight in the pool" do
-        job = described_class.new
-        fav = create(:quote, user: user, favourited: true)
-        plain = create(:quote, user: user, favourited: false)
-        pool = job.send(:weighted_sample_pool, [ fav, plain ])
-        expect(pool.count(fav)).to eq(DeliverQuoteJob::FAVOURITE_WEIGHT)
-        expect(pool.count(plain)).to eq(1)
-      end
+    describe "quote selection (unified via Quote.random_for)" do
+      it "selects only from the schedule's tag scope (C5)" do
+        tag = create(:tag, user: user, name: "stoic")
+        in_scope = create(:quote, user: user, content: "In the tag scope.")
+        create(:quote, user: user, content: "Out of the tag scope.")
+        in_scope.taggings.create!(tag: tag)
+        schedule.update!(tag: tag, pending_job_id: "test-job-id")
 
-      it "returns nil for an empty candidate list" do
-        expect(described_class.new.send(:weighted_sample, [])).to be_nil
+        allow_any_instance_of(described_class).to receive(:job_id).and_return("test-job-id")
+        described_class.perform_now(schedule.id, date_str)
+
+        expect(client).to have_received(:send_message).with(
+          hash_including(text: a_string_including("In the tag scope."))
+        )
       end
     end
 

@@ -104,7 +104,7 @@ module Bot
       when /\Aqc:no:(.+)\z/
         handle_quote_confirm_no(update, user, $1)
       when /\Aq:rand:(\d+)\z/
-        handle_quote_random_callback(update, user)
+        handle_quote_random_callback(update, user, $1.to_i)
       when /\Aq:show:(\d+)\z/
         client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
         handle_quote_show(update, user, $1.to_i)
@@ -343,8 +343,16 @@ module Bot
       quote.update!(times_delivered: quote.times_delivered + 1, last_delivered_at: Time.current)
     end
 
-    def handle_quote_random_callback(update, user)
-      quote = Quote.random_for(user)
+    def handle_quote_random_callback(update, user, schedule_id = 0)
+      # "Another" from a scheduled delivery card must stay within that schedule's
+      # scope (its tag). schedule_id 0 = on-demand → whole collection (C5).
+      tag = nil
+      if schedule_id.positive?
+        schedule = user.delivery_schedules.find_by(id: schedule_id)
+        tag = schedule&.tag
+      end
+
+      quote = Quote.random_for(user, tag: tag)
 
       if quote.nil?
         client.answer_callback_query(callback_query_id: update.callback_query_id, text: "No quotes yet!")

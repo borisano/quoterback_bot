@@ -21,7 +21,7 @@ class DeliverQuoteJob < ApplicationJob
     # Stale-job guard: bail if this is a duplicate or stale job
     return if job_id != schedule.pending_job_id
 
-    quote = select_quote(schedule, user)
+    quote = Quote.random_for(user, tag: schedule.tag)
 
     # The Telegram send is intentionally OUTSIDE any rescue so TelegramClient::Error
     # propagates up to retry_on, and TelegramClient::Forbidden is caught below.
@@ -51,32 +51,6 @@ class DeliverQuoteJob < ApplicationJob
   end
 
   private
-
-  def select_quote(schedule, user)
-    scope = if schedule.tag_id.present?
-      user.quotes.joins(:taggings).where(taggings: { tag_id: schedule.tag_id })
-    else
-      user.quotes
-    end
-
-    # Least-recently-delivered candidate pool, then favourite-weighted pick.
-    candidates = scope.order(Arel.sql("last_delivered_at ASC NULLS FIRST")).first(20)
-    weighted_sample(candidates)
-  end
-
-  # Favourited quotes get FAVOURITE_WEIGHT entries in the pool vs 1 for the rest,
-  # so they are ~3x more likely to be chosen while non-favourites still appear.
-  FAVOURITE_WEIGHT = 3
-
-  def weighted_sample(quotes)
-    return nil if quotes.empty?
-
-    weighted_sample_pool(quotes).sample
-  end
-
-  def weighted_sample_pool(quotes)
-    quotes.flat_map { |q| q.favourited? ? [ q ] * FAVOURITE_WEIGHT : [ q ] }
-  end
 
   def record_delivery(quote, schedule, user)
     local_date = Time.current.in_time_zone(user.timezone).to_date

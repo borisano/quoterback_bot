@@ -77,7 +77,7 @@ job.set(wait_until: run_at).enqueue                              # or job.schedu
 Drop the transaction (it's decorative across DBs). If enqueue raises, clear `pending_job_id` in a
 rescue. Update `quote_scheduler_spec` to assert the id is readable before the job is enqueued.
 
-### C5. `q:rand:<schedule_id>` ignores the schedule scope
+### C5. `q:rand:<schedule_id>` ignores the schedule scope ✅ IMPLEMENTED
 `DeliverQuoteJob` sends the delivery card with `🎲 Another → q:rand:#{schedule.id}` and the plan
 (§7.2/UX15) says "Another" must draw from the **same schedule's scope** (tag-scoped schedules).
 `handle_quote_random_callback` (`dispatcher.rb:332`) discards the captured id and always samples

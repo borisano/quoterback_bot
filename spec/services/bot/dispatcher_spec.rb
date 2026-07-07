@@ -753,6 +753,39 @@ RSpec.describe Bot::Dispatcher do
     end
   end
 
+  context "with q:rand:<schedule_id> callback (C5 — scoped 'Another')" do
+    let!(:tag) { create(:tag, user: user, name: "stoic") }
+    let!(:in_scope) { create(:quote, user: user, content: "Amor fati — love your fate.") }
+    let!(:out_scope) { create(:quote, user: user, content: "Totally unrelated content here.") }
+    let!(:schedule) { create(:delivery_schedule, user: user, tag: tag, hour: 9, minute: 0) }
+    before { in_scope.taggings.create!(tag: tag) }
+
+    it "returns a quote from the schedule's tag scope only" do
+      dispatcher.dispatch(parsed_update(callback_data: "q:rand:#{schedule.id}", callback_query_id: "cr1"))
+      expect(client).to have_received(:edit_message_text).with(
+        hash_including(text: a_string_including("Amor fati"))
+      )
+    end
+
+    it "falls back to the whole collection for q:rand:0" do
+      out_scope.update!(content: "Only quote left standing.")
+      in_scope.destroy
+      dispatcher.dispatch(parsed_update(callback_data: "q:rand:0", callback_query_id: "cr2"))
+      expect(client).to have_received(:edit_message_text).with(
+        hash_including(text: a_string_including("Only quote left standing."))
+      )
+    end
+
+    it "ignores another user's schedule id and uses the whole collection" do
+      other = create(:user)
+      other_sched = create(:delivery_schedule, user: other, hour: 8, minute: 0)
+      expect {
+        dispatcher.dispatch(parsed_update(callback_data: "q:rand:#{other_sched.id}", callback_query_id: "cr3"))
+      }.not_to raise_error
+      expect(client).to have_received(:edit_message_text)
+    end
+  end
+
   context "with q:tag:<id> callback" do
     let!(:quote) { create(:quote, user: user) }
 
