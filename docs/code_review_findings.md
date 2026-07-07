@@ -219,7 +219,7 @@ boot when blank, guarded by `next if ENV["SECRET_KEY_BASE_DUMMY"].present?` so i
 - Add specs alongside every C/M fix above; C1 (row width), C3 (stuck states), C4 (id persisted
   pre-enqueue) are the priority ones.
 
-### M16. Dev cache semantics differ from the plan's assumption
+### M16. Dev cache semantics differ from the plan's assumption ✅ ACKNOWLEDGED (no code change — by design)
 `development.rb` uses `:memory_store`; plan §6.2 asserts pending-confirm entries "survive app
 restarts" (true only for prod solid_cache). In dev the poller process owns the cache, so a poller
 restart invalidates pending confirmations/tz pickers → users see "expired". Acceptable — but
