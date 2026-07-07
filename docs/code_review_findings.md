@@ -23,7 +23,7 @@ silence** from `/list` once they have 9+ quotes. This is the single most user-vi
 ≤5). Keep `PAGE_SIZE` at 10. Add a dispatcher spec asserting that with 10 quotes no keyboard row
 exceeds 8 buttons.
 
-### C2. Markdown asterisks sent without `parse_mode` — literal `*` shown to users
+### C2. Markdown asterisks sent without `parse_mode` — literal `*` shown to users ✅ IMPLEMENTED
 No call in the codebase passes `parse_mode` (verified by grep), yet many messages contain
 Markdown chrome: `*QuoterBack*` (handle_start), `*Settings*`, `*QuoterBack Help*`,
 `*Common timezones:*`, `*#{tz.name}*` (apply_timezone ×2), `*##{tag.name}*`

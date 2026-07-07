@@ -159,7 +159,7 @@ module Bot
 
       client.send_message(
         chat_id: update.chat_id,
-        text: "👋 #{greeting} Welcome to *QuoterBack* — your personal quote collection.\n\n" \
+        text: "👋 #{greeting} Welcome to QuoterBack — your personal quote collection.\n\n" \
               "Send me any quote you love and I'll save it. Get it back any time, or have me send one every day.\n\n" \
               "Let's start by setting your timezone so I deliver at the right time for you.",
         reply_markup: {
@@ -446,7 +446,7 @@ module Bot
         "#{num}. #{q.content.truncate(80)}"
       end
 
-      header = tag ? "📋 *Quotes tagged ##{tag.name}* (#{total} total)" : "📋 *Your Quotes* (#{total} total)"
+      header = tag ? "📋 Quotes tagged ##{tag.name} (#{total} total)" : "📋 Your Quotes (#{total} total)"
       text = "#{header}\n\n#{lines.join("\n\n")}"
 
       # Carry the tag filter through pagination via the trailing :<tag_id> segment
@@ -546,7 +546,7 @@ module Bot
       tz_display = user.timezone.present? ? user.timezone : "not set"
       schedule_count = user.delivery_schedules.where(enabled: true).count
 
-      text = "⚙️ *Settings*\n\n" \
+      text = "⚙️ Settings\n\n" \
              "Quotes: #{quote_count} · TZ: #{tz_display} · Schedules: #{schedule_count}"
 
       client.send_message(
@@ -565,17 +565,17 @@ module Bot
     end
 
     def handle_help(update, user)
-      text = "📖 *QuoterBack Help*\n\n" \
-             "*Capture*\n" \
+      text = "📖 QuoterBack Help\n\n" \
+             "Capture\n" \
              "Just send me any text → I'll ask if it's a quote\n" \
              "/add — add a quote\n\n" \
-             "*Browse*\n" \
+             "Browse\n" \
              "/quote — random quote\n" \
              "/list — browse your collection\n\n" \
-             "*Deliver*\n" \
+             "Deliver\n" \
              "/schedule — set daily delivery time\n" \
              "/settimezone — set your timezone\n\n" \
-             "*Manage*\n" \
+             "Manage\n" \
              "/settings — your settings & stats\n" \
              "/delete [id] — delete a quote"
 
@@ -649,7 +649,7 @@ module Bot
       if old_timezone.nil?
         client.send_message(
           chat_id: update.chat_id,
-          text: "✅ You're all set! Timezone: *#{tz.name}* (local #{local_now.strftime('%H:%M')}).\n\n" \
+          text: "✅ You're all set! Timezone: #{tz.name} (local #{local_now.strftime('%H:%M')}).\n\n" \
                 "Now send me any quote you love and I'll save it for you. Tap ☰ Menu anytime to see commands.",
           reply_markup: {
             inline_keyboard: [ [
@@ -661,7 +661,7 @@ module Bot
       else
         client.send_message(
           chat_id: update.chat_id,
-          text: "✅ Timezone updated to *#{tz.name}* (#{local_now.strftime('%Z %z')}, local time #{local_now.strftime('%H:%M')})."
+          text: "✅ Timezone updated to #{tz.name} (#{local_now.strftime('%Z %z')}, local time #{local_now.strftime('%H:%M')})."
         )
       end
 
@@ -695,7 +695,7 @@ module Bot
 
       client.send_message(
         chat_id: update.chat_id,
-        text: "🌍 *Common timezones:*\n\n#{lines.join("\n")}\n\nUse /settimezone <city or offset> to set yours.",
+        text: "🌍 Common timezones:\n\n#{lines.join("\n")}\n\nUse /settimezone <city or offset> to set yours.",
         reply_markup: {
           inline_keyboard: [ [ { text: "🌍 Pick my timezone", callback_data: "ob:tz" } ] ]
         }
@@ -809,7 +809,7 @@ module Bot
 
       client.send_message(
         chat_id: update.chat_id,
-        text: "✅ Tagged with *##{tag.name}*",
+        text: "✅ Tagged with ##{tag.name}",
         reply_markup: {
           inline_keyboard: [ [
             { text: "🏷 Add another tag", callback_data: "q:tag:#{quote.id}" },
@@ -883,7 +883,7 @@ module Bot
       local_now = Time.current.in_time_zone(tz)
       client.send_message(
         chat_id: update.chat_id,
-        text: "✅ Daily quote scheduled for *#{format('%02d:%02d', hour, minute)}* " \
+        text: "✅ Daily quote scheduled for #{format('%02d:%02d', hour, minute)} " \
               "(#{tz.name}, your current time: #{local_now.strftime('%H:%M')}).\n\n" \
               "Use /cancel to stop daily delivery."
       )

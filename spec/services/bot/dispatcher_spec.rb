@@ -414,6 +414,79 @@ RSpec.describe Bot::Dispatcher do
     end
   end
 
+  # ── C2: plain-text copy (no literal Markdown asterisks) ─────────────────────
+
+  context "plain-text bot copy (C2 — no parse_mode, so no literal '*')" do
+    def all_sent_texts
+      sent = []
+      allow(client).to receive(:send_message) { |args| sent << args[:text] }
+      allow(client).to receive(:edit_message_text) { |args| sent << args[:text] }
+      sent
+    end
+
+    it "/start greeting contains no asterisks" do
+      texts = all_sent_texts
+      dispatcher.dispatch(parsed_update(text: "/start"))
+      expect(texts.join).not_to include("*")
+    end
+
+    it "/settings panel contains no asterisks" do
+      texts = all_sent_texts
+      dispatcher.dispatch(parsed_update(text: "/settings"))
+      expect(texts.join).not_to include("*")
+    end
+
+    it "/help contains no asterisks" do
+      texts = all_sent_texts
+      dispatcher.dispatch(parsed_update(text: "/help"))
+      expect(texts.join).not_to include("*")
+    end
+
+    it "/timezones contains no asterisks" do
+      texts = all_sent_texts
+      dispatcher.dispatch(parsed_update(text: "/timezones"))
+      expect(texts.join).not_to include("*")
+    end
+
+    it "/list header contains no asterisks" do
+      create_list(:quote, 3, user: user)
+      texts = all_sent_texts
+      dispatcher.dispatch(parsed_update(text: "/list"))
+      expect(texts.join).not_to include("*")
+    end
+
+    it "timezone confirmation contains no asterisks (first-time onboarding)" do
+      user.update!(timezone: nil)
+      texts = all_sent_texts
+      dispatcher.dispatch(parsed_update(text: "/settimezone London"))
+      expect(texts.join).not_to include("*")
+    end
+
+    it "timezone confirmation contains no asterisks (update)" do
+      user.update!(timezone: "America/New_York")
+      texts = all_sent_texts
+      dispatcher.dispatch(parsed_update(text: "/settimezone London"))
+      expect(texts.join).not_to include("*")
+    end
+
+    it "schedule confirmation contains no asterisks" do
+      user.update!(timezone: "Europe/London")
+      allow(QuoteScheduler).to receive(:schedule_for)
+      texts = all_sent_texts
+      dispatcher.dispatch(parsed_update(text: "/schedule 09:00"))
+      expect(texts.join).not_to include("*")
+    end
+
+    it "tag confirmation contains no asterisks" do
+      quote = create(:quote, user: user)
+      user.update!(state: "awaiting_tag_name")
+      Rails.cache.write("pending_tag_quote:#{user.telegram_chat_id}", quote.id, expires_in: 10.minutes)
+      texts = all_sent_texts
+      dispatcher.dispatch(parsed_update(text: "stoic"))
+      expect(texts.join).not_to include("*")
+    end
+  end
+
   # ── /settimezone ────────────────────────────────────────────────────────────
 
   context "with /settimezone command" do
