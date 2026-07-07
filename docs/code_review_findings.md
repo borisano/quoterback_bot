@@ -209,7 +209,7 @@ G5) exist, reply once with "I can only save text quotes right now — send me th
 runs with webhook auth silently disabled. Implement exactly per plan §13: raise in production
 boot when blank, guarded by `next if ENV["SECRET_KEY_BASE_DUMMY"].present?` so image builds pass.
 
-### M15. Missing test coverage (all green ≠ all covered)
+### M15. Missing test coverage (all green ≠ all covered) ✅ IMPLEMENTED
 - **No request spec for `TelegramWebhooksController`** — plan §15 requires: valid/invalid/blank
   secret; and "returns 200 even when the dispatcher raises". (The dispatcher rescues internally,
   but a spec must pin that a raising handler still yields `head :ok`, and that a raise in
