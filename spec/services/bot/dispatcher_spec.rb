@@ -201,6 +201,46 @@ RSpec.describe Bot::Dispatcher do
         end
       end
 
+      context "keyboard row width (C1 — Telegram caps inline rows at 8 buttons)" do
+        def captured_keyboard
+          captured = nil
+          allow(client).to receive(:send_message) { |args| captured = args }
+          dispatcher.dispatch(parsed_update(text: "/list"))
+          captured.dig(:reply_markup, :inline_keyboard)
+        end
+
+        it "keeps every row at or under 8 buttons with a full page of 10 quotes" do
+          create_list(:quote, 10, user: user)
+          captured_keyboard.each do |row|
+            expect(row.size).to be <= 8
+          end
+        end
+
+        it "splits the 10 number buttons across multiple rows" do
+          create_list(:quote, 10, user: user)
+          number_rows = captured_keyboard.select do |row|
+            row.all? { |btn| btn[:callback_data].to_s.start_with?("q:show:") }
+          end
+          expect(number_rows.size).to be >= 2
+          expect(number_rows.sum(&:size)).to eq(10)
+        end
+
+        it "still exposes every quote as a numbered button" do
+          create_list(:quote, 10, user: user)
+          show_ids = captured_keyboard.flatten.filter_map do |btn|
+            btn[:callback_data][/\Aq:show:(\d+)\z/, 1]&.to_i
+          end
+          expect(show_ids.size).to eq(10)
+        end
+
+        it "keeps rows small on a partial page too (7 quotes)" do
+          create_list(:quote, 7, user: user)
+          captured_keyboard.each do |row|
+            expect(row.size).to be <= 8
+          end
+        end
+      end
+
       context "with a #tag filter" do
         let!(:tag) { create(:tag, user: user, name: "stoic") }
         let!(:tagged) { create(:quote, user: user) }

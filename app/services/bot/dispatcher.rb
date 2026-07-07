@@ -455,13 +455,15 @@ module Bot
       number_buttons = page_quotes.each_with_index.map do |q, i|
         { text: "#{offset + i + 1}", callback_data: "q:show:#{q.id}" }
       end
+      # Telegram caps inline-keyboard rows at 8 buttons; split into rows of 5 (C1).
+      number_rows = number_buttons.each_slice(5).to_a
 
       nav = []
       nav << { text: "⬅️", callback_data: "list:pg:#{page - 1}#{tag_suffix}" } if page > 1
       nav << { text: "#{page}/#{total_pages}", callback_data: "list:noop" }
       nav << { text: "➡️", callback_data: "list:pg:#{page + 1}#{tag_suffix}" } if page < total_pages
 
-      keyboard = [ number_buttons, nav, [ { text: "🎲 Random", callback_data: "q:rand:0" } ] ]
+      keyboard = [ *number_rows, nav, [ { text: "🎲 Random", callback_data: "q:rand:0" } ] ]
 
       if edit
         client.edit_message_text(chat_id: update.chat_id, message_id: update.message_id, text: text, reply_markup: { inline_keyboard: keyboard })
