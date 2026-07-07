@@ -51,6 +51,11 @@ module Bot
           user.update!(state: nil)
           client.send_message(chat_id: update.chat_id, text: "👍 Cancelled.")
         else
+          # TODO(UX23/G1): /cancel is reserved for aborting the current flow.
+          # Stopping delivery belongs in the /schedules manager (sched:del). Until
+          # that exists this is the only way to stop daily delivery, so keep it;
+          # once /schedules ships, replace this with "Nothing to cancel. Manage
+          # deliveries in /schedules." (M11)
           schedules = user.delivery_schedules.where(enabled: true)
           if schedules.any?
             schedules.each do |sched|

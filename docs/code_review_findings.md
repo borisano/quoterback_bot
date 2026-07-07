@@ -185,7 +185,7 @@ should set `state: "ready"`, not `nil`. **Fix:** set `"ready"` there, and treat
 `ready`/`new`/`nil` identically in routing (they already are — only `awaiting_*` states branch).
 Low risk, restores the invariant the code pretends to have.
 
-### M11. `/cancel` is overloaded, contradicting plan UX23
+### M11. `/cancel` is overloaded, contradicting plan UX23 ✅ IMPLEMENTED (TODO left; behavior kept until G1)
 With no active state, `/cancel` disables **all** schedules. Plan UX23 explicitly reserves
 `/cancel` for aborting the current flow; schedule removal belongs to the `/schedules` manager
 (`sched:del`). Since `/schedules` doesn't exist yet (G1), this is currently the *only* way to
