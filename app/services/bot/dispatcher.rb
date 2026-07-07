@@ -178,12 +178,16 @@ module Bot
 
     def handle_add(update, user, text)
       if text.present?
-        user.quotes.create!(content: text)
-        count = user.quotes.count
-        client.send_message(
-          chat_id: update.chat_id,
-          text: "✅ Saved (quote #{count} in your collection)"
-        )
+        result = QuoteCreator.call(user: user, content: text)
+        if result.success?
+          count = user.quotes.count
+          client.send_message(
+            chat_id: update.chat_id,
+            text: "✅ Saved (quote #{count} in your collection)"
+          )
+        else
+          client.send_message(chat_id: update.chat_id, text: "❌ #{result.error_message}")
+        end
       else
         user.update!(state: "awaiting_quote_text")
         client.send_message(
@@ -194,7 +198,13 @@ module Bot
     end
 
     def handle_awaiting_quote_text(update, user, text)
-      user.quotes.create!(content: text)
+      result = QuoteCreator.call(user: user, content: text)
+      unless result.success?
+        # Keep the state so the next message is another attempt (or /cancel).
+        client.send_message(chat_id: update.chat_id, text: "❌ #{result.error_message} Try again, or /cancel.")
+        return
+      end
+
       user.update!(state: nil)
       count = user.quotes.count
       client.send_message(
@@ -240,7 +250,13 @@ module Bot
 
       client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
 
-      quote = user.quotes.create!(content: entry[:text])
+      result = QuoteCreator.call(user: user, content: entry[:text])
+      unless result.success?
+        client.send_message(chat_id: update.chat_id, text: "❌ #{result.error_message}")
+        return
+      end
+
+      quote = result.quote
       Rails.cache.delete("pending_quote:#{token}")
 
       count = user.quotes.count
@@ -259,8 +275,6 @@ module Bot
           ] ]
         }
       )
-    rescue ActiveRecord::RecordInvalid => e
-      client.send_message(chat_id: update.chat_id, text: "❌ Couldn't save: #{e.message}")
     end
 
     def handle_quote_confirm_no(update, user, token)
@@ -790,6 +804,12 @@ module Bot
 
       raw_name = text.strip
       normalized = raw_name.gsub(/\A#+/, "").downcase.gsub(/\s+/, "_").strip
+
+      if normalized.length > 30
+        client.send_message(chat_id: update.chat_id,
+          text: "❌ Tag names must be 30 characters or fewer. Try again:")
+        return
+      end
 
       if normalized.empty? || normalized !~ /\A[a-z0-9_]+\z/
         client.send_message(chat_id: update.chat_id,

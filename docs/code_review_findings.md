@@ -36,7 +36,7 @@ messages interpolate user content (tag names are safe post-normalization, but qu
 timezone input echoes are not), and MarkdownV2 escaping is a bug farm. Plain text is the plan's
 recommended choice. Grep for `\*` in `app/services/bot/dispatcher.rb` and strip.
 
-### C3. Quote/tag validation failures are silent dead-ends and can wedge the state machine
+### C3. Quote/tag validation failures are silent dead-ends and can wedge the state machine ✅ IMPLEMENTED
 `Quote` validates `content` length 3..1000; `Tag` validates name max 30. Several creation paths
 call `create!`/`find_or_create_by!` with no rescue, so `ActiveRecord::RecordInvalid` bubbles to
 `dispatch`'s blanket rescue → logged, **no reply to the user**:

@@ -111,6 +111,27 @@ RSpec.describe Bot::Dispatcher do
       end
     end
 
+    context "with /add command and invalid content (C3 — no silent dead-end)" do
+      it "does not create a quote for too-short text" do
+        expect {
+          dispatcher.dispatch(parsed_update(text: "/add hi"))
+        }.not_to change { user.quotes.count }
+      end
+
+      it "replies with a human validation message" do
+        dispatcher.dispatch(parsed_update(text: "/add hi"))
+        expect(client).to have_received(:send_message).with(
+          hash_including(chat_id: 111, text: a_string_including("3"))
+        )
+      end
+
+      it "does not create a quote for too-long text" do
+        expect {
+          dispatcher.dispatch(parsed_update(text: "/add #{'x' * 1001}"))
+        }.not_to change { user.quotes.count }
+      end
+    end
+
     context "when user is in awaiting_quote_text state" do
       before { user.update!(state: "awaiting_quote_text") }
 
@@ -118,6 +139,33 @@ RSpec.describe Bot::Dispatcher do
         expect {
           dispatcher.dispatch(parsed_update(text: "To be or not to be."))
         }.to change { user.quotes.count }.by(1)
+      end
+
+      context "with invalid content (C3 — must not wedge the state machine)" do
+        it "does not create a quote" do
+          expect {
+            dispatcher.dispatch(parsed_update(text: "hi"))
+          }.not_to change { user.quotes.count }
+        end
+
+        it "keeps the user in awaiting_quote_text so they can retry" do
+          dispatcher.dispatch(parsed_update(text: "hi"))
+          expect(user.reload.state).to eq("awaiting_quote_text")
+        end
+
+        it "replies with a human validation message" do
+          dispatcher.dispatch(parsed_update(text: "hi"))
+          expect(client).to have_received(:send_message).with(
+            hash_including(text: a_string_including("3"))
+          )
+        end
+
+        it "does NOT fall through to confirm-on-text" do
+          dispatcher.dispatch(parsed_update(text: "hi"))
+          expect(client).not_to have_received(:send_message).with(
+            hash_including(text: a_string_including("Add this as a quote"))
+          )
+        end
       end
 
       it "clears the user state" do
@@ -346,6 +394,37 @@ RSpec.describe Bot::Dispatcher do
           dispatcher.dispatch(parsed_update(callback_data: "qc:yes:#{token}", callback_query_id: "cq1"))
           expect(client).to have_received(:answer_callback_query).with(
             hash_including(callback_query_id: "cq1")
+          )
+        end
+      end
+
+      context "qc:yes:<token> with invalid cached content (C3)" do
+        let(:token) { "toolongtoken" }
+
+        before do
+          Rails.cache.write(
+            "pending_quote:#{token}",
+            { from_id: 111, chat_id: 111, text: "x" * 1001 },
+            expires_in: 10.minutes
+          )
+        end
+
+        it "does not create a quote" do
+          expect {
+            dispatcher.dispatch(parsed_update(callback_data: "qc:yes:#{token}", callback_query_id: "cqbad"))
+          }.not_to change { user.quotes.count }
+        end
+
+        it "does not raise" do
+          expect {
+            dispatcher.dispatch(parsed_update(callback_data: "qc:yes:#{token}", callback_query_id: "cqbad"))
+          }.not_to raise_error
+        end
+
+        it "tells the user with a human message" do
+          dispatcher.dispatch(parsed_update(callback_data: "qc:yes:#{token}", callback_query_id: "cqbad"))
+          expect(client).to have_received(:send_message).with(
+            hash_including(text: a_string_including("1000"))
           )
         end
       end
@@ -793,6 +872,26 @@ RSpec.describe Bot::Dispatcher do
     it "rejects invalid tag names" do
       dispatcher.dispatch(parsed_update(text: "!!!"))
       expect(user.reload.state).to eq("awaiting_tag_name") # stays in state
+    end
+
+    context "with a name longer than 30 chars (C3 — must not wedge the state machine)" do
+      it "does not create a tag" do
+        expect {
+          dispatcher.dispatch(parsed_update(text: "a" * 31))
+        }.not_to change { user.tags.count }
+      end
+
+      it "keeps the user in awaiting_tag_name to retry" do
+        dispatcher.dispatch(parsed_update(text: "a" * 31))
+        expect(user.reload.state).to eq("awaiting_tag_name")
+      end
+
+      it "replies with a clear message" do
+        dispatcher.dispatch(parsed_update(text: "a" * 31))
+        expect(client).to have_received(:send_message).with(
+          hash_including(text: a_string_including("30"))
+        )
+      end
     end
   end
 
