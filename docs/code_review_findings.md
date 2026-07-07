@@ -59,7 +59,7 @@ state and re-prompt (that's the natural "try again" loop). For tags: enforce max
 reply with the existing "try again" pattern. This choke point is also where the free-tier limit
 stub (G8) slots in later — build it with that in mind.
 
-### C4. `QuoteScheduler.schedule_for`'s transaction does not actually close the N5 race in production
+### C4. `QuoteScheduler.schedule_for`'s transaction does not actually close the N5 race in production ✅ IMPLEMENTED
 `app/services/quote_scheduler.rb:13`: the enqueue + `schedule.update!(pending_job_id:)` are
 wrapped in `ActiveRecord::Base.transaction`, per plan §7.1/N5. But in **production** Solid Queue
 lives in a separate `queue` SQLite database (`config/database.yml`), so the job INSERT commits on

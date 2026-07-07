@@ -46,9 +46,28 @@ RSpec.describe QuoteScheduler do
         .to have_enqueued_job(DeliverQuoteJob)
     end
 
-    it "writes pending_job_id to the schedule in the same transaction" do
+    it "writes pending_job_id to the schedule" do
       described_class.schedule_for(schedule)
       expect(schedule.reload.pending_job_id).not_to be_nil
+    end
+
+    it "persists pending_job_id BEFORE the job is enqueued (C4 — closes the cross-DB race)" do
+      persisted_at_enqueue = :not_called
+      allow_any_instance_of(DeliverQuoteJob).to receive(:enqueue) do |job, *_|
+        persisted_at_enqueue = schedule.reload.pending_job_id
+        job
+      end
+
+      described_class.schedule_for(schedule)
+
+      expect(persisted_at_enqueue).to be_present
+      expect(persisted_at_enqueue).to eq(schedule.reload.pending_job_id)
+    end
+
+    it "clears pending_job_id if the enqueue raises" do
+      allow_any_instance_of(DeliverQuoteJob).to receive(:enqueue).and_raise(RuntimeError, "queue down")
+      expect { described_class.schedule_for(schedule) }.to raise_error(RuntimeError)
+      expect(schedule.reload.pending_job_id).to be_nil
     end
 
     it "does nothing when schedule is disabled" do

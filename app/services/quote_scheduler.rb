@@ -10,12 +10,19 @@ module QuoteScheduler
 
     run_at = next_run_time(schedule)
 
-    ActiveRecord::Base.transaction do
-      job = DeliverQuoteJob.set(wait_until: run_at).perform_later(
-        schedule.id,
-        run_at.to_date.iso8601
-      )
-      schedule.update!(pending_job_id: job.job_id)
+    # Persist the id BEFORE enqueuing so the stale-job guard in DeliverQuoteJob
+    # can never see a mismatch for a job that starts before the write commits.
+    # A transaction cannot cover this: in production Solid Queue lives in a
+    # separate database, so the job INSERT is not part of the primary-DB
+    # transaction (C4). Ordering is the real fix; the guard is the backstop.
+    job = DeliverQuoteJob.new(schedule.id, run_at.to_date.iso8601)
+    schedule.update!(pending_job_id: job.job_id)
+
+    begin
+      job.enqueue(wait_until: run_at)
+    rescue StandardError
+      schedule.update!(pending_job_id: nil)
+      raise
     end
   end
 
