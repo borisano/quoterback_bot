@@ -967,6 +967,35 @@ RSpec.describe Bot::Dispatcher do
     end
   end
 
+  context "tag picker re-renders in place after toggling (M6)" do
+    let!(:quote) { create(:quote, user: user) }
+    let!(:tag) { create(:tag, user: user, name: "stoic") }
+
+    it "edits the picker message on tag:add instead of sending a new one" do
+      dispatcher.dispatch(parsed_update(callback_data: "tag:add:#{quote.id}:#{tag.id}", callback_query_id: "ta1"))
+      expect(client).to have_received(:edit_message_text).with(
+        hash_including(text: a_string_including("Tag this quote"))
+      )
+      expect(client).not_to have_received(:send_message)
+    end
+
+    it "edits the picker message on tag:rm" do
+      quote.taggings.create!(tag: tag)
+      dispatcher.dispatch(parsed_update(callback_data: "tag:rm:#{quote.id}:#{tag.id}", callback_query_id: "tr1"))
+      expect(client).to have_received(:edit_message_text).with(
+        hash_including(text: a_string_including("Tag this quote"))
+      )
+      expect(client).not_to have_received(:send_message)
+    end
+
+    it "sends a new message when first opening the picker via q:tag" do
+      dispatcher.dispatch(parsed_update(callback_data: "q:tag:#{quote.id}", callback_query_id: "qt1"))
+      expect(client).to have_received(:send_message).with(
+        hash_including(text: a_string_including("Tag this quote"))
+      )
+    end
+  end
+
   context "with tag:rm:<quote_id>:<tag_id> callback" do
     let!(:quote) { create(:quote, user: user) }
     let!(:tag) { create(:tag, user: user, name: "stoic") }

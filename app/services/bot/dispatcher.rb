@@ -753,7 +753,7 @@ module Bot
       )
     end
 
-    def handle_tag_picker(update, user, quote_id)
+    def handle_tag_picker(update, user, quote_id, edit: false)
       quote = user.quotes.find_by(id: quote_id)
       unless quote
         client.send_message(chat_id: update.chat_id, text: "🤷 That quote's no longer here.")
@@ -772,11 +772,16 @@ module Bot
       buttons << [ { text: "➕ New tag", callback_data: "tag:new:#{quote.id}" } ]
       buttons << [ { text: "🔙 Back", callback_data: "q:show:#{quote.id}" } ]
 
-      client.send_message(
-        chat_id: update.chat_id,
-        text: "🏷 Tag this quote:\n\n\"#{quote.content.truncate(100)}\"",
-        reply_markup: { inline_keyboard: buttons }
-      )
+      text = "🏷 Tag this quote:\n\n\"#{quote.content.truncate(100)}\""
+      markup = { inline_keyboard: buttons }
+
+      # Re-renders after a toggle edit the existing message instead of stacking
+      # a new picker in the chat (M6). First open (via q:tag) sends fresh.
+      if edit
+        client.edit_message_text(chat_id: update.chat_id, message_id: update.message_id, text: text, reply_markup: markup)
+      else
+        client.send_message(chat_id: update.chat_id, text: text, reply_markup: markup)
+      end
     end
 
     def handle_tag_add(update, user, quote_id:, tag_id:)
@@ -790,7 +795,7 @@ module Bot
 
       quote.taggings.find_or_create_by!(tag: tag)
       client.answer_callback_query(callback_query_id: update.callback_query_id, text: "✓ Tagged ##{tag.name}")
-      handle_tag_picker(update, user, quote_id)
+      handle_tag_picker(update, user, quote_id, edit: true)
     rescue ActiveRecord::RecordNotUnique
       client.answer_callback_query(callback_query_id: update.callback_query_id, text: "✓ Already tagged")
     end
@@ -806,7 +811,7 @@ module Bot
 
       quote.taggings.where(tag: tag).destroy_all
       client.answer_callback_query(callback_query_id: update.callback_query_id, text: "✓ Removed ##{tag.name}")
-      handle_tag_picker(update, user, quote_id)
+      handle_tag_picker(update, user, quote_id, edit: true)
     end
 
     def handle_tag_new(update, user, quote_id)

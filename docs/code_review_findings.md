@@ -150,7 +150,7 @@ build the back button from them; number buttons in `render_list` already know bo
 do nothing. **Fix:** `edit_message_text` to the standard "🤷 That quote's no longer here." card
 with a `[📋 See your list]` button (pattern already exists in `handle_delete_confirm_callback`).
 
-### M6. Tag picker spams a new message on every toggle
+### M6. Tag picker spams a new message on every toggle ✅ IMPLEMENTED
 `handle_tag_add`/`handle_tag_remove` re-render by calling `handle_tag_picker`, which always
 `send_message`s — each tag toggle stacks another picker in the chat. Plan §8.5 mandates
 edit-in-place. **Fix:** give `handle_tag_picker` an `edit:` flag (like `render_list`); the
