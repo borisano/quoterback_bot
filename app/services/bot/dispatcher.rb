@@ -311,7 +311,7 @@ module Bot
       if tag_arg.present?
         raw = tag_arg.strip
         if raw.start_with?("#")
-          tag_name = raw.sub(/\A#+/, "").downcase.gsub(/\s+/, "_")
+          tag_name = Tag.normalize(raw)
           tag = user.tags.find_by(name: tag_name)
           if tag.nil?
             client.send_message(
@@ -321,7 +321,7 @@ module Bot
             return
           end
         else
-          tag = user.tags.find_by(name: raw.downcase)
+          tag = user.tags.find_by(name: Tag.normalize(raw))
           # if no match, tag stays nil and we fall back to random (N11)
         end
       end
@@ -462,7 +462,7 @@ module Bot
 
       raw = tag_arg.strip
       if raw.start_with?("#")
-        tag_name = raw.sub(/\A#+/, "").downcase.gsub(/\s+/, "_")
+        tag_name = Tag.normalize(raw)
         tag = user.tags.find_by(name: tag_name)
         if tag.nil?
           client.send_message(chat_id: update.chat_id, text: "🏷 You have no quotes tagged ##{tag_name} yet.")
@@ -471,7 +471,7 @@ module Bot
         tag
       else
         # Bare word: filter only on an exact tag hit, else no filter (N11)
-        user.tags.find_by(name: raw.downcase)
+        user.tags.find_by(name: Tag.normalize(raw))
       end
     end
 
@@ -852,8 +852,7 @@ module Bot
         return
       end
 
-      raw_name = text.strip
-      normalized = raw_name.gsub(/\A#+/, "").downcase.gsub(/\s+/, "_").strip
+      normalized = Tag.normalize(text)
 
       if normalized.length > 30
         client.send_message(chat_id: update.chat_id,

@@ -1133,6 +1133,26 @@ RSpec.describe Bot::Dispatcher do
     end
   end
 
+  context "tag lookup normalization consistency (M8)" do
+    let!(:tag) { create(:tag, user: user, name: "my_tag") }
+    let!(:quote) { create(:quote, user: user) }
+    before { quote.taggings.create!(tag: tag) }
+
+    it "finds a tag via /quote with a multi-word #tag that normalizes to it" do
+      dispatcher.dispatch(parsed_update(text: "/quote #My Tag"))
+      expect(client).not_to have_received(:send_message).with(
+        hash_including(text: a_string_including("no quotes tagged"))
+      )
+    end
+
+    it "finds a tag via /list with a multi-word #tag that normalizes to it" do
+      dispatcher.dispatch(parsed_update(text: "/list #My Tag"))
+      expect(client).to have_received(:send_message).with(
+        hash_including(text: a_string_including("Quotes tagged #my_tag"))
+      )
+    end
+  end
+
   context "with /quote bare-word that is not an existing tag" do
     it "falls back to random quote, NOT 'empty tag' (issue N11)" do
       create(:quote, user: user)

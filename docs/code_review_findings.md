@@ -162,7 +162,7 @@ initial `q:tag` entry may send a new message, but re-renders after add/remove mu
 can dismiss another member's pending quote. **Fix:** same `entry[:from_id] == update.from_id`
 guard as the yes-path (read entry before deleting; if entry is nil just answer the callback).
 
-### M8. `Tag#normalize_name` disagrees with the dispatcher's normalization
+### M8. `Tag#normalize_name` disagrees with the dispatcher's normalization ✅ IMPLEMENTED
 Model: strips **one** leading `#` (`/\A#/`), downcases, strips — but does **not** collapse
 internal whitespace to `_`. Dispatcher (3 call sites): `/\A#+/` + `gsub(/\s+/, "_")`. Any future
 path creating tags through the model alone (import, `/tag` fallback) can produce names with

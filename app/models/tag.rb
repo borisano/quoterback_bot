@@ -6,12 +6,20 @@ class Tag < ApplicationRecord
 
   validates :name, presence: true, length: { maximum: 30 }
   validates :name, uniqueness: { scope: :user_id }
+  validates :name, format: { with: /\A[a-z0-9_]+\z/ }, allow_blank: true
 
   before_validation :normalize_name
+
+  # Single source of truth for tag name normalization (M8): strip leading #,
+  # downcase, trim, and collapse internal whitespace to underscores. The
+  # dispatcher calls this for lookups so stored names and queries always agree.
+  def self.normalize(raw)
+    raw.to_s.sub(/\A#+/, "").strip.downcase.gsub(/\s+/, "_")
+  end
 
   private
 
   def normalize_name
-    self.name = name.to_s.gsub(/\A#/, "").downcase.strip if name.present?
+    self.name = self.class.normalize(name) if name.present?
   end
 end
