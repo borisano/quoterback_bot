@@ -41,8 +41,12 @@ module Bot
     def handle_text(update, user)
       text = update.text.strip
 
+      # In groups Telegram appends @BotName to commands (/quote@MyBot); strip it
+      # so command routing matches (M1). Only the first token is a command.
+      command = text.split(/\s+/, 2).first.to_s.sub(/@[\w]+\z/i, "")
+
       # /cancel always escapes any state
-      if text.downcase == "/cancel"
+      if command.downcase == "/cancel"
         if user.state.present?
           user.update!(state: nil)
           client.send_message(chat_id: update.chat_id, text: "👍 Cancelled.")
@@ -71,7 +75,7 @@ module Bot
         return handle_awaiting_tag_name(update, user, text) unless text.start_with?("/")
       end
 
-      command, rest = text.split(/\s+/, 2)
+      rest = text.split(/\s+/, 2)[1]
 
       case command.downcase
       when "/start"                        then handle_start(update, user, rest.presence)

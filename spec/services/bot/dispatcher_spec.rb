@@ -75,6 +75,37 @@ RSpec.describe Bot::Dispatcher do
       end
     end
 
+    context "with /command@BotName form (M1)" do
+      it "treats /quote@Bot as /quote" do
+        dispatcher.dispatch(parsed_update(text: "/quote@QuoterBackBot"))
+        expect(client).to have_received(:send_message).with(
+          hash_including(text: a_string_including("no quotes"))
+        )
+      end
+
+      it "does not fall through to confirm-on-text" do
+        dispatcher.dispatch(parsed_update(text: "/help@QuoterBackBot"))
+        expect(client).not_to have_received(:send_message).with(
+          hash_including(text: a_string_including("Add this as a quote"))
+        )
+        expect(client).to have_received(:send_message).with(
+          hash_including(text: a_string_including("QuoterBack Help"))
+        )
+      end
+
+      it "passes the argument through for /command@Bot arg" do
+        expect {
+          dispatcher.dispatch(parsed_update(text: "/add@QuoterBackBot A perfectly valid quote here."))
+        }.to change { user.quotes.count }.by(1)
+      end
+
+      it "honors /cancel@Bot as a state escape" do
+        user.update!(state: "awaiting_quote_text")
+        dispatcher.dispatch(parsed_update(text: "/cancel@QuoterBackBot"))
+        expect(user.reload.state).to be_nil
+      end
+    end
+
     context "with /start command" do
       it "sends a welcome message with inline keyboard" do
         dispatcher.dispatch(parsed_update(text: "/start"))

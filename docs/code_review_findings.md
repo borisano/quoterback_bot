@@ -118,7 +118,7 @@ text-command failures. Also add `Rollbar.error` to `Bot::Poller`'s rescue and to
 
 ## M. Medium bugs & uncovered edge cases
 
-### M1. `/command@BotName` form is not recognized
+### M1. `/command@BotName` form is not recognized ✅ IMPLEMENTED
 In groups (and sometimes via autocomplete in DMs) Telegram sends `/quote@QuoterBackBot`. The
 `case command.downcase` matches nothing → falls through to **confirm-on-text**, so the bot asks
 "Add this as a quote? _/quote@QuoterBackBot_". **Fix:** after splitting, strip a trailing
