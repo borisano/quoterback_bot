@@ -32,6 +32,20 @@ RSpec.describe Bot::Dispatcher do
       end
     end
 
+    context "with a non-text message (photo/sticker/voice) (M13)" do
+      it "replies that only text quotes are supported" do
+        dispatcher.dispatch(parsed_update(text: nil, message_id: 5))
+        expect(client).to have_received(:send_message).with(
+          hash_including(chat_id: 111, text: a_string_including("text"))
+        )
+      end
+
+      it "does not treat it as a callback" do
+        dispatcher.dispatch(parsed_update(text: nil, message_id: 5))
+        expect(client).not_to have_received(:answer_callback_query)
+      end
+    end
+
     context "when a handler raises (C7 — error policy)" do
       before { allow(User).to receive(:find_or_create_from_update!).and_raise(StandardError, "boom") }
 

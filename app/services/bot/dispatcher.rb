@@ -17,6 +17,8 @@ module Bot
         handle_callback(update, user)
       elsif update.text.present?
         handle_text(update, user)
+      else
+        handle_unsupported_message(update)
       end
     rescue StandardError => e
       Rails.logger.error("[Bot::Dispatcher] Error: #{e.class} — #{e.message}")
@@ -204,6 +206,16 @@ module Bot
 
     def handle_ping(update)
       client.send_message(chat_id: update.chat_id, text: "🏓 Pong!")
+    end
+
+    # A message with no text (photo, document, sticker, voice, …). Until image
+    # capture and import land, tell the user what we accept rather than going
+    # silent (M13).
+    def handle_unsupported_message(update)
+      client.send_message(
+        chat_id: update.chat_id,
+        text: "📝 I can only save text quotes right now — send me the text and I'll save it!"
+      )
     end
 
     def handle_add(update, user, text)

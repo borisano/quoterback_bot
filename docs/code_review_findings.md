@@ -197,7 +197,7 @@ The easter-egg branch `text.match?(/ping me in/i)` runs before confirm-on-text, 
 message containing that substring triggers PingJob instead of the save prompt. Tighten to an
 anchored match (`/\Aping me in\s+\d+/i`) or drop the easter egg.
 
-### M13. Non-text messages are silently ignored
+### M13. Non-text messages are silently ignored ✅ IMPLEMENTED
 Photos (even with captions), documents, stickers, voice → `UpdateParser` yields
 `text: nil, callback_data: nil` → `dispatch` does nothing. Until the image/import features (G4,
 G5) exist, reply once with "I can only save text quotes right now — send me the text!" when a
