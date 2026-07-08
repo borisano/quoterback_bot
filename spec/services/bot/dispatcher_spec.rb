@@ -210,6 +210,41 @@ RSpec.describe Bot::Dispatcher do
       end
     end
 
+    context "action buttons on a saved quote (button-first)" do
+      def keyboard_for_last_send
+        captured = nil
+        allow(client).to receive(:send_message) { |args| captured = args }
+        yield
+        captured&.dig(:reply_markup, :inline_keyboard)
+      end
+
+      it "/add <text> success carries Tag, Fav, and Delete buttons for the new quote" do
+        kb = keyboard_for_last_send { dispatcher.dispatch(parsed_update(text: "/add A brand new saved quote here.")) }
+        new_id = user.quotes.last.id
+        cbs = kb.flatten.map { |b| b[:callback_data] }
+        expect(cbs).to include("q:tag:#{new_id}", "fav:toggle:#{new_id}", "q:del:#{new_id}")
+      end
+
+      it "awaiting_quote_text success carries the action row" do
+        user.update!(state: "awaiting_quote_text")
+        kb = keyboard_for_last_send { dispatcher.dispatch(parsed_update(text: "Saved via the state flow.")) }
+        new_id = user.quotes.last.id
+        cbs = kb.flatten.map { |b| b[:callback_data] }
+        expect(cbs).to include("q:tag:#{new_id}", "fav:toggle:#{new_id}")
+      end
+
+      it "confirm-on-text yes edits into a card with the action row" do
+        token = "savedtok"
+        Rails.cache.write("pending_quote:#{token}", { from_id: 111, chat_id: 111, text: "Confirmed quote text." }, expires_in: 10.minutes)
+        captured = nil
+        allow(client).to receive(:edit_message_text) { |args| captured = args }
+        dispatcher.dispatch(parsed_update(callback_data: "qc:yes:#{token}", callback_query_id: "cy1"))
+        new_id = user.quotes.last.id
+        cbs = captured[:reply_markup][:inline_keyboard].flatten.map { |b| b[:callback_data] }
+        expect(cbs).to include("q:tag:#{new_id}", "fav:toggle:#{new_id}")
+      end
+    end
+
     context "with /add command and invalid content (C3 — no silent dead-end)" do
       it "does not create a quote for too-short text" do
         expect {

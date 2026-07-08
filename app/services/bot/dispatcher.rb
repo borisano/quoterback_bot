@@ -221,6 +221,24 @@ module Bot
       )
     end
 
+    # Action row shown on a just-saved quote so the user can tag/fav/delete or
+    # jump to browsing without typing (plan UX4). All callbacks carry the id.
+    def saved_quote_keyboard(quote)
+      {
+        inline_keyboard: [
+          [
+            { text: "🏷 Tag", callback_data: "q:tag:#{quote.id}" },
+            { text: "❤️ Fav", callback_data: "fav:toggle:#{quote.id}" },
+            { text: "🗑 Delete", callback_data: "q:del:#{quote.id}" }
+          ],
+          [
+            { text: "🎲 Get a quote", callback_data: "q:rand:0" },
+            { text: "📋 My quotes", callback_data: "list:pg:1" }
+          ]
+        ]
+      }
+    end
+
     def handle_add(update, user, text)
       if text.present?
         result = QuoteCreator.call(user: user, content: text)
@@ -228,7 +246,8 @@ module Bot
           count = user.quotes.count
           client.send_message(
             chat_id: update.chat_id,
-            text: "✅ Saved (quote #{count} in your collection)"
+            text: "✅ Saved (quote #{count} in your collection)",
+            reply_markup: saved_quote_keyboard(result.quote)
           )
         else
           client.send_message(chat_id: update.chat_id, text: "❌ #{result.error_message}")
@@ -254,7 +273,8 @@ module Bot
       count = user.quotes.count
       client.send_message(
         chat_id: update.chat_id,
-        text: "✅ Saved (quote #{count} in your collection)"
+        text: "✅ Saved (quote #{count} in your collection)",
+        reply_markup: saved_quote_keyboard(result.quote)
       )
     end
 
@@ -308,17 +328,13 @@ module Bot
       is_first = count == 1
 
       success_text = "✅ Saved (quote #{count} in your collection)"
-      success_text += "\n\n💡 Want one delivered daily? Set a schedule!" if is_first
+      success_text += "\n\n💡 Want one delivered daily? Use /schedule to set a daily time." if is_first
 
       client.edit_message_text(
         chat_id: update.chat_id,
         message_id: update.message_id,
         text: success_text,
-        reply_markup: {
-          inline_keyboard: [ [
-            { text: "🗑 Undo", callback_data: "q:del:#{quote.id}" }
-          ] ]
-        }
+        reply_markup: saved_quote_keyboard(quote)
       )
     end
 
