@@ -495,6 +495,15 @@ RSpec.describe Bot::Dispatcher do
           hash_including(chat_id: 111, text: a_string_including("Settings"))
         )
       end
+
+      it "includes navigation buttons to browse/get quotes (button-first)" do
+        captured = nil
+        allow(client).to receive(:send_message) { |a| captured = a }
+        dispatcher.dispatch(parsed_update(text: "/settings"))
+        cbs = captured[:reply_markup][:inline_keyboard].flatten.map { |b| b[:callback_data] }
+        expect(cbs).to include("q:rand:0", "list:pg:1")
+        expect(cbs).to include("set:tz") # config buttons still present
+      end
     end
 
     context "with /help command" do
@@ -503,6 +512,14 @@ RSpec.describe Bot::Dispatcher do
         expect(client).to have_received(:send_message).with(
           hash_including(chat_id: 111, text: a_string_including("QuoterBack Help"))
         )
+      end
+
+      it "offers launcher buttons for the core flows (button-first)" do
+        captured = nil
+        allow(client).to receive(:send_message) { |a| captured = a }
+        dispatcher.dispatch(parsed_update(text: "/help"))
+        cbs = captured[:reply_markup][:inline_keyboard].flatten.map { |b| b[:callback_data] }
+        expect(cbs).to include("q:rand:0", "list:pg:1", "ob:addfirst", "ob:tz")
       end
     end
 
@@ -569,6 +586,14 @@ RSpec.describe Bot::Dispatcher do
           expect(client).to have_received(:send_message).with(
             hash_including(chat_id: 111, text: a_string_including("expired"))
           )
+        end
+
+        it "offers an 'Add a quote' button instead of dead-ending (button-first)" do
+          captured = nil
+          allow(client).to receive(:send_message) { |a| captured = a }
+          dispatcher.dispatch(parsed_update(callback_data: "qc:yes:expiredtoken", callback_query_id: "cq2"))
+          cbs = captured[:reply_markup][:inline_keyboard].flatten.map { |b| b[:callback_data] }
+          expect(cbs).to include("ob:addfirst")
         end
       end
 

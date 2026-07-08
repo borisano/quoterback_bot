@@ -303,7 +303,8 @@ module Bot
       if entry.nil?
         client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
         client.send_message(chat_id: update.chat_id,
-          text: "⏰ That quote expired — please send it again.")
+          text: "⏰ That quote expired — please send it again.",
+          reply_markup: { inline_keyboard: [ [ { text: "✍️ Add a quote", callback_data: "ob:addfirst" } ] ] })
         return
       end
 
@@ -680,7 +681,9 @@ module Bot
              { text: "⏰ Schedules", callback_data: "set:sched" } ],
             [ { text: "🏷 Tags", callback_data: "set:tags" },
              { text: "📊 Stats", callback_data: "set:stats" } ],
-            [ { text: "📥 Import", callback_data: "set:import" } ]
+            [ { text: "📥 Import", callback_data: "set:import" } ],
+            [ { text: "🎲 Get a quote", callback_data: "q:rand:0" },
+             { text: "📋 My quotes", callback_data: "list:pg:1" } ]
           ]
         }
       )
@@ -705,10 +708,12 @@ module Bot
         chat_id: update.chat_id,
         text: text,
         reply_markup: {
-          inline_keyboard: [ [
-            { text: "🎲 Random quote", callback_data: "q:rand:0" },
-            { text: "📋 Browse", callback_data: "list:pg:1" }
-          ] ]
+          inline_keyboard: [
+            [ { text: "🎲 Random quote", callback_data: "q:rand:0" },
+             { text: "📋 Browse", callback_data: "list:pg:1" } ],
+            [ { text: "✍️ Add a quote", callback_data: "ob:addfirst" },
+             { text: "🌍 Timezone", callback_data: "ob:tz" } ]
+          ]
         }
       )
     end
