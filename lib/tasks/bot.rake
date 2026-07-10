@@ -43,6 +43,7 @@ namespace :bot do
     client = Telegram::Bot::Client.new(token)
     result = client.api.set_my_commands(
       commands: [
+        { command: "menu",        description: "Show the action menu 📱" },
         { command: "quote",       description: "Get a random quote 🎲" },
         { command: "list",        description: "Browse your quotes 📋" },
         { command: "add",         description: "Add a quote ✍️" },

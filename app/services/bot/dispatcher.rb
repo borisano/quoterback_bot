@@ -4,6 +4,23 @@ module Bot
   class Dispatcher
     PAGE_SIZE = 10
 
+    # Persistent reply-keyboard labels. A tap sends the label as a plain text
+    # message, so we map each to the command it should invoke — buttons and
+    # slash commands then share one code path.
+    MENU_QUOTE    = "🎲 Quote"
+    MENU_LIST     = "📋 My quotes"
+    MENU_ADD      = "➕ Add quote"
+    MENU_SETTINGS = "⚙️ Settings"
+    MENU_HELP     = "📖 Help"
+
+    BUTTON_LABELS = {
+      MENU_QUOTE    => "/quote",
+      MENU_LIST     => "/list",
+      MENU_ADD      => "/add",
+      MENU_SETTINGS => "/settings",
+      MENU_HELP     => "/help"
+    }.freeze
+
     def initialize(client: TelegramClient.from_env)
       @client = client
     end
@@ -42,6 +59,11 @@ module Bot
 
     def handle_text(update, user)
       text = update.text.strip
+
+      # A tap on the persistent reply keyboard arrives as its label text; remap
+      # it to the equivalent command so buttons behave exactly like commands
+      # (including escaping conversation states).
+      text = BUTTON_LABELS[text] || text
 
       # In groups Telegram appends @BotName to commands (/quote@MyBot); strip it
       # so command routing matches (M1). Only the first token is a command.
@@ -94,6 +116,7 @@ module Bot
       when "/delete"                       then handle_delete_command(update, user, rest)
       when "/settings"                     then handle_settings(update, user)
       when "/help"                         then handle_help(update, user)
+      when "/menu"                         then handle_menu(update, user)
       when "/settimezone", "/timezone"     then handle_settimezone(update, user, rest)
       when "/schedule"                     then handle_schedule_command(update, user, rest)
       when "/cancel"                       then # already handled above
@@ -192,6 +215,17 @@ module Bot
 
       greeting = user.first_name.present? ? "Hey #{user.first_name}!" : "Hey there!"
 
+      # Returning user (already onboarded): skip setup, just resurface the
+      # persistent action menu so common actions are one tap away.
+      if user.timezone.present?
+        client.send_message(
+          chat_id: update.chat_id,
+          text: "👋 #{greeting} Welcome back to QuoterBack. Tap an action below, or send me any text to save it.",
+          reply_markup: main_reply_keyboard
+        )
+        return
+      end
+
       client.send_message(
         chat_id: update.chat_id,
         text: "👋 #{greeting} Welcome to QuoterBack — your personal quote collection.\n\n" \
@@ -209,6 +243,30 @@ module Bot
 
     def handle_ping(update)
       client.send_message(chat_id: update.chat_id, text: "🏓 Pong!")
+    end
+
+    # Persistent action buttons shown above the text input (ReplyKeyboardMarkup).
+    # Once sent it stays visible across messages, giving every user always-on
+    # common actions without typing. Labels are remapped to commands in
+    # #handle_text via BUTTON_LABELS.
+    def main_reply_keyboard
+      {
+        keyboard: [
+          [ { text: MENU_QUOTE }, { text: MENU_LIST } ],
+          [ { text: MENU_ADD }, { text: MENU_SETTINGS } ],
+          [ { text: MENU_HELP } ]
+        ],
+        resize_keyboard: true,
+        is_persistent: true
+      }
+    end
+
+    def handle_menu(update, user)
+      client.send_message(
+        chat_id: update.chat_id,
+        text: "📱 Here's your menu — tap an action below, or type / to see every command.",
+        reply_markup: main_reply_keyboard
+      )
     end
 
     # A message with no text (photo, document, sticker, voice, …). Until image
@@ -778,13 +836,9 @@ module Bot
         client.send_message(
           chat_id: update.chat_id,
           text: "✅ You're all set! Timezone: #{tz.name} (local #{local_now.strftime('%H:%M')}).\n\n" \
-                "Now send me any quote you love and I'll save it for you. Tap ☰ Menu anytime to see commands.",
-          reply_markup: {
-            inline_keyboard: [ [
-              { text: "✍️ Add my first quote", callback_data: "ob:addfirst" },
-              { text: "📖 Show commands", callback_data: "ob:help" }
-            ] ]
-          }
+                "Now send me any quote you love and I'll save it. Use the buttons below anytime — " \
+                "or type / to see every command.",
+          reply_markup: main_reply_keyboard
         )
       else
         client.send_message(

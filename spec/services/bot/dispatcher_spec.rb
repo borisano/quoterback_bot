@@ -506,6 +506,67 @@ RSpec.describe Bot::Dispatcher do
       end
     end
 
+    context "persistent reply-keyboard menu (always-visible actions)" do
+      def captured_send
+        captured = nil
+        allow(client).to receive(:send_message) { |a| captured = a }
+        yield
+        captured
+      end
+
+      it "/menu sends a persistent reply keyboard with the common actions" do
+        sent = captured_send { dispatcher.dispatch(parsed_update(text: "/menu")) }
+        expect(sent[:reply_markup]).to include(:keyboard)
+        labels = sent[:reply_markup][:keyboard].flatten.map { |b| b[:text] }
+        expect(labels).to include("🎲 Quote", "📋 My quotes", "➕ Add quote", "⚙️ Settings", "📖 Help")
+      end
+
+      it "marks the keyboard persistent and resized" do
+        sent = captured_send { dispatcher.dispatch(parsed_update(text: "/menu")) }
+        expect(sent[:reply_markup]).to include(is_persistent: true, resize_keyboard: true)
+      end
+
+      it "routes a '🎲 Quote' button tap to /quote" do
+        dispatcher.dispatch(parsed_update(text: "🎲 Quote"))
+        expect(client).to have_received(:send_message).with(hash_including(text: a_string_including("no quotes")))
+      end
+
+      it "does not treat a button tap as confirm-on-text" do
+        dispatcher.dispatch(parsed_update(text: "📋 My quotes"))
+        expect(client).not_to have_received(:send_message).with(
+          hash_including(text: a_string_including("Add this as a quote"))
+        )
+      end
+
+      it "routes '⚙️ Settings' to the settings panel" do
+        dispatcher.dispatch(parsed_update(text: "⚙️ Settings"))
+        expect(client).to have_received(:send_message).with(hash_including(text: a_string_including("Settings")))
+      end
+
+      it "'➕ Add quote' starts the add flow" do
+        dispatcher.dispatch(parsed_update(text: "➕ Add quote"))
+        expect(user.reload.state).to eq("awaiting_quote_text")
+      end
+
+      it "a button tap escapes an awaiting state (like a command)" do
+        user.update!(state: "awaiting_timezone")
+        dispatcher.dispatch(parsed_update(text: "📋 My quotes"))
+        expect(client).to have_received(:send_message).with(hash_including(text: a_string_including("no quotes")))
+      end
+
+      it "/start for a returning (timezone-set) user shows the reply keyboard" do
+        user.update!(timezone: "Europe/London", state: "ready")
+        sent = captured_send { dispatcher.dispatch(parsed_update(text: "/start")) }
+        expect(sent[:reply_markup]).to include(:keyboard)
+      end
+
+      it "attaches the reply keyboard when onboarding completes" do
+        user.update!(timezone: nil)
+        sent = captured_send { dispatcher.dispatch(parsed_update(text: "/settimezone London")) }
+        expect(sent[:reply_markup]).to include(:keyboard)
+      end
+    end
+
     context "with /help command" do
       it "sends the help message" do
         dispatcher.dispatch(parsed_update(text: "/help"))
@@ -779,10 +840,10 @@ RSpec.describe Bot::Dispatcher do
         )
       end
 
-      it "offers an add-first-quote button" do
+      it "offers the persistent action keyboard on completion" do
         dispatcher.dispatch(parsed_update(text: "/settimezone London"))
         expect(client).to have_received(:send_message).with(
-          hash_including(reply_markup: hash_including(:inline_keyboard))
+          hash_including(reply_markup: hash_including(:keyboard))
         )
       end
     end
