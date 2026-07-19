@@ -60,6 +60,9 @@ class TelegramClient
   rescue Telegram::Bot::Exceptions::ResponseError => e
     raise Forbidden, e.message if e.response.status == 403
     raise Error, e.message
+  rescue URI::InvalidURIError
+    # The offending string is the token-bearing URL — never surface it (§17).
+    raise Error, "file download failed (bad path)"
   end
 
   private

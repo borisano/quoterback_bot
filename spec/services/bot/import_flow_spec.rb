@@ -116,5 +116,12 @@ RSpec.describe Bot::Dispatcher, "import from a text file (G5)" do
       # And it is treated as a normal capture, not swallowed.
       expect(client).to have_received(:send_message).with(hash_including(text: a_string_including("Add this as a quote")))
     end
+
+    it "clears an active awaiting_tag_name state when a document is imported (Fable #8)" do
+      user.update!(state: "awaiting_tag_name")
+      allow(client).to receive(:download_file).and_return("A good quote line here")
+      dispatcher.dispatch(update(document: doc))
+      expect(user.reload.state).to be_nil
+    end
   end
 end

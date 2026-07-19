@@ -105,6 +105,13 @@ RSpec.describe TelegramClient do
       stub_request(:get, file_url).to_return(status: 200, body: "bad\xFFbyte".b)
       expect { client.download_file("FID") }.not_to raise_error
     end
+
+    it "never leaks the token if Telegram returns a URI-invalid file_path" do
+      allow(api).to receive(:get_file).and_return(double(result: double(file_path: "documents/bad path.txt"))) # rubocop:disable RSpec/VerifiedDoubles
+      expect { client.download_file("FID") }.to raise_error(TelegramClient::Error) do |e|
+        expect(e.message).not_to include("TEST_TOKEN")
+      end
+    end
   end
 
   describe "'message is not modified' handling (C6)" do

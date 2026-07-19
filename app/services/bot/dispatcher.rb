@@ -73,9 +73,11 @@ module Bot
 
       # /cancel always escapes any state
       if command.downcase == "/cancel"
-        if user.state.present?
-          user.update!(state: nil)
-          # Abandon any in-progress schedule builder too, so /cancel fully resets.
+        # The schedule builder lives only in the cache (no user.state), so check it
+        # too — otherwise /cancel mid-build would falsely report "nothing to cancel"
+        # while the builder's buttons stayed live (Fable review #1).
+        if user.state.present? || read_sched_builder(update).present?
+          user.update!(state: nil) if user.state.present?
           clear_sched_builder(update)
           client.send_message(chat_id: update.chat_id, text: "👍 Cancelled.")
         else
@@ -345,6 +347,14 @@ module Bot
           text: "📄 I can only import plain .txt files (one quote per line) right now."
         )
         return
+      end
+
+      # A document interrupts any text-capture flow; drop that state (and its cache)
+      # so the user's next message isn't mis-consumed as a tag name or quote (Fable
+      # review #8).
+      if %w[awaiting_tag_name awaiting_quote_text].include?(user.state)
+        user.update!(state: nil)
+        Rails.cache.delete("pending_tag_quote:#{update.chat_id}")
       end
 
       # file_size is optional in Telegram's payload; when present it lets us reject
@@ -1023,7 +1033,7 @@ module Bot
         return
       end
 
-      user_tags = user.tags.order(:name)
+      user_tags = user.tags.order(:name).limit(TAG_BUTTON_LIMIT)
       applied_tag_ids = quote.taggings.pluck(:tag_id).to_set
 
       buttons = user_tags.map do |tag|
@@ -1346,9 +1356,13 @@ module Bot
       show_schedule_tag_chooser(update, user, edit: true)
     end
 
+    # One button per tag (plus Any + Cancel); cap so the keyboard stays under
+    # Telegram's 100-button limit for users with many tags (Fable review #2).
+    TAG_BUTTON_LIMIT = 90
+
     def show_schedule_tag_chooser(update, user, edit:)
       buttons = [ [ { text: "🌐 Any (whole collection)", callback_data: "sched:tag:any" } ] ]
-      user.tags.order(:name).each do |tag|
+      user.tags.order(:name).limit(TAG_BUTTON_LIMIT).each do |tag|
         buttons << [ { text: "##{tag.name}", callback_data: "sched:tag:#{tag.id}" } ]
       end
       buttons << [ { text: "✖️ Cancel", callback_data: "sched:cancel" } ]
@@ -1443,10 +1457,12 @@ module Bot
 
     def handle_schedule_create(update, user)
       builder = read_sched_builder(update)
-      return builder_expired(update) if builder.blank? || builder[:hour].nil?
+      # Require both hour and minute — a stale/crafted sched:create must not commit
+      # a half-built schedule at HH:00 (Fable review #5).
+      return builder_expired(update) if builder.blank? || builder[:hour].nil? || builder[:minute].nil?
 
       hour   = builder[:hour]
-      minute = builder[:minute].to_i
+      minute = builder[:minute]
 
       # The edit target may have been deleted (e.g. its tag was removed) while the
       # builder was open — report it rather than silently creating a new row.
@@ -1481,16 +1497,25 @@ module Bot
         return show_schedules_manager(update, user, edit: true)
       end
 
-      schedule.assign_attributes(hour: hour, minute: minute, tag: tag, enabled: true)
+      # A brand-new schedule starts enabled; editing an existing one must preserve
+      # its enabled/paused state so changing a paused schedule's time doesn't
+      # silently re-enable it (Fable review #4).
+      enabled = schedule.new_record? ? true : schedule.enabled?
+      schedule.assign_attributes(hour: hour, minute: minute, tag: tag, enabled: enabled)
       schedule.save!
-      QuoteScheduler.schedule_for(schedule)
+
+      if schedule.enabled?
+        QuoteScheduler.schedule_for(schedule)
+      else
+        QuoteScheduler.cancel_pending_for(schedule)
+      end
 
       clear_sched_builder(update)
       client.answer_callback_query(callback_query_id: update.callback_query_id, text: "✅ Saved")
       client.edit_message_text(
         chat_id: update.chat_id,
         message_id: update.message_id,
-        text: schedule_created_text(user, schedule),
+        text: schedule_saved_text(user, schedule),
         reply_markup: { inline_keyboard: [ [ { text: "📅 My schedules", callback_data: "set:sched" } ] ] }
       )
     end
@@ -1643,6 +1668,14 @@ module Bot
       "✅ Daily quote scheduled — #{schedule_label(schedule)} " \
         "(#{tz.name}, your current time: #{local_now.strftime('%H:%M')}).\n\n" \
         "Manage it any time in /schedules."
+    end
+
+    # Confirmation after the builder saves. A paused schedule that was just edited
+    # stays paused — say so rather than implying it's live.
+    def schedule_saved_text(user, schedule)
+      return schedule_created_text(user, schedule) if schedule.enabled?
+
+      "✅ Updated — #{schedule_label(schedule)} (still paused). Resume it any time in /schedules."
     end
 
     def sched_builder_key(update)

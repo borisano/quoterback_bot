@@ -152,6 +152,32 @@ RSpec.describe Bot::Dispatcher, "schedule builder + manager (G1)" do
       dispatcher.dispatch(update(callback_data: "sched:h:9", callback_query_id: "c2"))
       expect(client).to have_received(:send_message).with(hash_including(text: a_string_including("expired")))
     end
+
+    it "/cancel aborts an in-progress builder even with no user state (Fable #1)" do
+      dispatcher.dispatch(update(text: "/schedule"))
+      expect(user.reload.state).to be_nil # builder is cache-only
+      dispatcher.dispatch(update(text: "/cancel"))
+      expect(client).to have_received(:send_message).with(hash_including(text: a_string_including("Cancelled")))
+      # The builder is gone: a follow-up step reports expiry.
+      dispatcher.dispatch(update(callback_data: "sched:h:9", callback_query_id: "c2"))
+      expect(client).to have_received(:send_message).with(hash_including(text: a_string_including("expired")))
+    end
+
+    it "expires a stale sched:create that has an hour but no minute (Fable #5)" do
+      Rails.cache.write("sched_builder:111", { edit_id: nil, hour: 9 }, expires_in: 15.minutes)
+      expect {
+        dispatcher.dispatch(update(callback_data: "sched:create", callback_query_id: "c1"))
+      }.not_to change { user.delivery_schedules.count }
+      expect(client).to have_received(:send_message).with(hash_including(text: a_string_including("expired")))
+    end
+
+    it "caps the scope-chooser keyboard under Telegram's button limit (Fable #2)" do
+      100.times { |i| create(:tag, user: user, name: "tag#{format('%03d', i)}") }
+      dispatcher.dispatch(update(text: "/schedule"))
+      expect(client).to have_received(:send_message) do |args|
+        expect(args[:reply_markup][:inline_keyboard].flatten.size).to be <= 100
+      end
+    end
   end
 
   # ── Typed fallback ───────────────────────────────────────────────────────────
@@ -281,6 +307,19 @@ RSpec.describe Bot::Dispatcher, "schedule builder + manager (G1)" do
         }.not_to change { user.delivery_schedules.count }
 
         expect(schedule.reload).to have_attributes(hour: 20, minute: 15)
+      end
+
+      it "keeps a paused schedule paused when only its time is edited (Fable #4)" do
+        schedule.update!(enabled: false)
+        dispatcher.dispatch(update(callback_data: "sched:edit:#{schedule.id}", callback_query_id: "c1"))
+        dispatcher.dispatch(update(callback_data: "sched:tag:any", callback_query_id: "c2"))
+        dispatcher.dispatch(update(callback_data: "sched:h:20", callback_query_id: "c3"))
+        dispatcher.dispatch(update(callback_data: "sched:m:0", callback_query_id: "c4"))
+        dispatcher.dispatch(update(callback_data: "sched:create", callback_query_id: "c5"))
+
+        expect(schedule.reload).to have_attributes(hour: 20, enabled: false)
+        expect(QuoteScheduler).not_to have_received(:schedule_for).with(schedule)
+        expect(client).to have_received(:edit_message_text).with(hash_including(text: a_string_including("still paused")))
       end
 
       it "reports the row is gone if the edited schedule was deleted before Create" do
