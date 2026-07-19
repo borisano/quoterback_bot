@@ -264,8 +264,13 @@ fixer should confirm with the author which are in scope now. Ordered by user imp
    service — one quote per non-blank line, routed through `QuoteCreator`, skipping too-short and
    duplicate lines, reporting "Imported N (skipped M)". See `spec/services/quote_importer_spec.rb`
    and `spec/services/bot/import_flow_spec.rb`.
-6. **Tag management**: no `/tags` command; no tag-delete flow (`tag:dely`/`tag:deln` with the
-   blast-radius confirmation naming affected schedules, plan §8.5.5).
+6. ✅ IMPLEMENTED — **Tag management**: `/tags` (and the `set:tags` settings button) lists every
+   tag with its quote count, a 🔍 browse-this-tag shortcut (`list:pg:1:<tag_id>`), and a 🗑 delete
+   button (`tag:del:<id>`). Delete asks for confirmation and **names the blast radius** of
+   affected schedules (plan §8.5.5) — "⚠️ This also removes 2 schedules (09:00, 21:00)." — then
+   `tag:dely`/`tag:deln` destroys or keeps. Destroy cascades taggings + tag-scoped schedules
+   (whose pending jobs are cancelled by `DeliverySchedule#before_destroy`); quotes keep their
+   text. See `spec/services/bot/tags_flow_spec.rb`.
 7. **`/dnd` + snooze** (plan §9.5): `dnd_weekdays` column exists, wholly unused; delivery card
    lacks `😴 Snooze today`; delivery card buttons diverge from UX15 (`Delete/Another` instead of
    `Fav/Another/Snooze`) — reconcile when building this.

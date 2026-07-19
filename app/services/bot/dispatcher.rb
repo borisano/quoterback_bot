@@ -123,6 +123,7 @@ module Bot
       when "/schedule"                     then handle_schedule_command(update, user, rest)
       when "/schedules"                    then handle_schedules_command(update, user)
       when "/import"                       then handle_import_command(update, user)
+      when "/tags"                         then handle_tags_command(update, user)
       when "/cancel"                       then # already handled above
       else
         # Anchor at the start so a quote merely containing "ping me in" isn't
@@ -172,6 +173,12 @@ module Bot
         handle_tag_remove(update, user, quote_id: $1.to_i, tag_id: $2.to_i)
       when /\Atag:new:(\d+)\z/
         handle_tag_new(update, user, $1.to_i)
+      when /\Atag:del:(\d+)\z/
+        handle_tag_delete_confirm(update, user, $1.to_i)
+      when /\Atag:dely:(\d+)\z/
+        handle_tag_delete_yes(update, user, $1.to_i)
+      when /\Atag:deln:(\d+)\z/
+        handle_tag_delete_no(update, user, $1.to_i)
       when /\Afav:toggle:(\d+)\z/
         handle_fav_toggle(update, user, $1.to_i)
       when /\Aq:bytag:(\d+)\z/
@@ -202,6 +209,9 @@ module Bot
       when /\Aset:sched\z/
         client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
         show_schedules_manager(update, user)
+      when /\Aset:tags\z/
+        client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
+        show_tags_manager(update, user)
       when /\Aset:import\z/
         client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
         handle_import_command(update, user)
@@ -880,6 +890,7 @@ module Bot
              "/schedules — manage your deliveries\n" \
              "/settimezone — set your timezone\n\n" \
              "Manage\n" \
+             "/tags — manage your tags\n" \
              "/settings — your settings & stats\n" \
              "/delete [id] — delete a quote"
 
@@ -1079,6 +1090,85 @@ module Bot
         chat_id: update.chat_id,
         text: "🏷 Type the tag name (e.g. stoic, motivation):"
       )
+    end
+
+    # ── Tag management: /tags list + delete flow (G6, plan §9.1/§8.5.5) ──────────
+
+    def handle_tags_command(update, user)
+      show_tags_manager(update, user)
+    end
+
+    def show_tags_manager(update, user, edit: false)
+      tags = user.tags
+                 .left_joins(:taggings)
+                 .group("tags.id")
+                 .select("tags.*, COUNT(taggings.id) AS quotes_count")
+                 .order("tags.name")
+
+      if tags.empty?
+        send_or_edit(
+          update,
+          "🏷 You haven't created any tags yet.\n\nOpen any quote and tap 🏷 Tag to start organizing your collection.",
+          { inline_keyboard: [ [ { text: "📋 My quotes", callback_data: "list:pg:1" } ] ] },
+          edit: edit
+        )
+        return
+      end
+
+      lines = tags.map { |t| "##{t.name} — #{t.quotes_count} quote#{'s' unless t.quotes_count == 1}" }
+      text = "🏷 Your tags\n\n#{lines.join("\n")}"
+
+      keyboard = tags.flat_map do |t|
+        [ [
+          { text: "🔍 ##{t.name}", callback_data: "list:pg:1:#{t.id}" },
+          { text: "🗑", callback_data: "tag:del:#{t.id}" }
+        ] ]
+      end
+
+      send_or_edit(update, text, { inline_keyboard: keyboard }, edit: edit)
+    end
+
+    def handle_tag_delete_confirm(update, user, tag_id)
+      tag = user.tags.find_by(id: tag_id)
+      unless tag
+        client.answer_callback_query(callback_query_id: update.callback_query_id, text: "That tag is gone")
+        return show_tags_manager(update, user, edit: true)
+      end
+
+      client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
+
+      # Name the blast radius before deleting (plan §8.5.5): deleting a tag also
+      # destroys its tag-scoped delivery schedules. Quotes keep their text.
+      schedules = tag.delivery_schedules.order(:hour, :minute)
+      warning =
+        if schedules.any?
+          times = schedules.map { |s| format("%02d:%02d", s.hour, s.minute) }.join(", ")
+          "\n\n⚠️ This also removes #{schedules.size} schedule#{'s' unless schedules.size == 1} (#{times})."
+        else
+          ""
+        end
+
+      client.edit_message_text(
+        chat_id: update.chat_id,
+        message_id: update.message_id,
+        text: "🗑 Delete ##{tag.name}? Your quotes keep their text — they just lose this tag.#{warning}",
+        reply_markup: { inline_keyboard: [ [
+          { text: "🗑 Delete anyway", callback_data: "tag:dely:#{tag.id}" },
+          { text: "Cancel", callback_data: "tag:deln:#{tag.id}" }
+        ] ] }
+      )
+    end
+
+    def handle_tag_delete_yes(update, user, tag_id)
+      tag = user.tags.find_by(id: tag_id)
+      tag&.destroy # cascades taggings + tag-scoped schedules (whose jobs are cancelled)
+      client.answer_callback_query(callback_query_id: update.callback_query_id, text: "🗑 Deleted")
+      show_tags_manager(update, user, edit: true)
+    end
+
+    def handle_tag_delete_no(update, user, tag_id)
+      client.answer_callback_query(callback_query_id: update.callback_query_id, text: "👍 Kept")
+      show_tags_manager(update, user, edit: true)
     end
 
     def handle_awaiting_tag_name(update, user, text)

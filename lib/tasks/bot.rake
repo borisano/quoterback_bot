@@ -50,6 +50,7 @@ namespace :bot do
         { command: "settings",    description: "Your settings ⚙️" },
         { command: "schedule",    description: "Set daily delivery ⏰" },
         { command: "schedules",   description: "Manage daily deliveries 📅" },
+        { command: "tags",        description: "Manage your tags 🏷" },
         { command: "settimezone", description: "Set your timezone 🌍" },
         { command: "help",        description: "How it works 📖" }
       ].to_json
