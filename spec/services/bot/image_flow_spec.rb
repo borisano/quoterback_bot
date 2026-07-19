@@ -133,6 +133,33 @@ RSpec.describe Bot::Dispatcher, "image attachments (G4)" do
       dispatcher.dispatch(update(callback_data: "q:img:#{other_quote.id}", callback_query_id: "c1"))
       expect(user.reload.state).to be_nil
     end
+
+    it "supports the /addimage <id> typed fallback" do
+      dispatcher.dispatch(update(text: "/addimage #{quote.id}"))
+      expect(user.reload.state).to eq("awaiting_image_for_quote")
+    end
+
+    it "reports a bad /addimage id without wedging state" do
+      dispatcher.dispatch(update(text: "/addimage 999999"))
+      expect(user.reload.state).to be_nil
+      expect(client).to have_received(:send_message).with(hash_including(text: a_string_including("Couldn't find")))
+    end
+
+    it "abandons awaiting_image_for_quote if the user sends text instead of a photo" do
+      dispatcher.dispatch(update(callback_data: "q:img:#{quote.id}", callback_query_id: "c1"))
+      dispatcher.dispatch(update(text: "changed my mind, here's a new quote"))
+      expect(user.reload.state).to be_nil
+    end
+  end
+
+  describe "'Another' when the source card was a photo but the next pick is text" do
+    it "falls back to a fresh message when editing a media card fails" do
+      create(:quote, user: user, content: "A text-only quote here", photo_file_id: nil)
+      # Simulate Telegram rejecting an edit of a media message.
+      allow(client).to receive(:edit_message_text).and_raise(TelegramClient::Error, "no text in the message to edit")
+      dispatcher.dispatch(update(callback_data: "q:rand:0", callback_query_id: "c1"))
+      expect(client).to have_received(:send_message).with(hash_including(text: a_string_including("A text-only quote here")))
+    end
   end
 
   describe "delivering a photo quote on /quote" do

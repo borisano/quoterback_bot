@@ -95,10 +95,14 @@ module Bot
         return
       end
 
-      # A text message while we're waiting for an import file means the user
-      # changed their mind — drop the flag so they aren't stuck, then fall through
-      # to normal routing (the text is treated as a command or a quote to save).
-      user.update!(state: nil) if user.state == "awaiting_import_file"
+      # A text message while we're waiting for a file/photo upload means the user
+      # changed their mind — drop the flag (and any target cache) so they aren't
+      # stuck, then fall through to normal routing (the text is treated as a
+      # command or a quote to save).
+      if %w[awaiting_import_file awaiting_image_for_quote].include?(user.state)
+        Rails.cache.delete("pending_image_quote:#{update.chat_id}") if user.state == "awaiting_image_for_quote"
+        user.update!(state: nil)
+      end
 
       # State machine takes priority over commands (except /cancel above)
       case user.state
@@ -130,6 +134,7 @@ module Bot
       when "/schedules"                    then handle_schedules_command(update, user)
       when "/import"                       then handle_import_command(update, user)
       when "/tags"                         then handle_tags_command(update, user)
+      when "/addimage"                     then handle_addimage_command(update, user, rest)
       when "/cancel"                       then # already handled above
       else
         # Anchor at the start so a quote merely containing "ping me in" isn't
@@ -461,7 +466,7 @@ module Bot
 
     def handle_awaiting_quote_text_for_photo(update, user, text)
       entry = Rails.cache.read("pending_photo:#{update.chat_id}")
-      unless entry
+      if entry.nil? || entry[:from_id] != update.from_id
         user.update!(state: nil)
         client.send_message(chat_id: update.chat_id, text: "⏰ That image expired — please send it again.")
         return
@@ -538,6 +543,24 @@ module Bot
       end
 
       client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
+      begin_image_attach(update, user, quote)
+    end
+
+    # Typed power-user fallback for the 📷 button (plan §6.6/§8.5.3): /addimage <id>.
+    def handle_addimage_command(update, user, id_str)
+      quote = id_str.present? && user.quotes.find_by(id: id_str.to_i)
+      unless quote
+        client.send_message(
+          chat_id: update.chat_id,
+          text: "🤷 Couldn't find that quote. Open one from /list and tap 📷 Image instead.",
+          reply_markup: { inline_keyboard: [ [ { text: "📋 My quotes", callback_data: "list:pg:1" } ] ] }
+        )
+        return
+      end
+      begin_image_attach(update, user, quote)
+    end
+
+    def begin_image_attach(update, user, quote)
       Rails.cache.write("pending_image_quote:#{update.chat_id}", quote.id, expires_in: 10.minutes)
       user.update!(state: "awaiting_image_for_quote")
       client.send_message(chat_id: update.chat_id, text: "📷 Send me a photo to attach to this quote.")
@@ -826,12 +849,18 @@ module Bot
         Bot::QuoteMessenger.send_quote(client: client, chat_id: update.chat_id, quote: quote, reply_markup: keyboard)
       else
         presenter = Bot::QuotePresenter.new(quote)
-        client.edit_message_text(
-          chat_id: update.chat_id,
-          message_id: update.message_id,
-          text: presenter.message_text,
-          reply_markup: keyboard
-        )
+        begin
+          client.edit_message_text(
+            chat_id: update.chat_id,
+            message_id: update.message_id,
+            text: presenter.message_text,
+            reply_markup: keyboard
+          )
+        rescue TelegramClient::Error
+          # The source card was a photo (media) message — you can't edit text into
+          # it — so send the text quote as a fresh message instead.
+          client.send_message(chat_id: update.chat_id, text: presenter.message_text, reply_markup: keyboard)
+        end
       end
 
       record_on_demand_delivery(user, quote)

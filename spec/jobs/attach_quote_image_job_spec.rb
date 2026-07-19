@@ -42,4 +42,29 @@ RSpec.describe AttachQuoteImageJob do
     allow(tg).to receive(:download_file)
     expect { described_class.perform_now(-1) }.not_to raise_error
   end
+
+  it "retries on a transient download Error" do
+    quote = create(:quote, user: user, photo_file_id: "FID")
+    allow(tg).to receive(:download_file).and_raise(TelegramClient::Error, "timeout")
+    expect {
+      described_class.perform_now(quote.id)
+    }.to have_enqueued_job(described_class)
+  end
+
+  it "does not attach or retry when the bot is blocked (Forbidden)" do
+    quote = create(:quote, user: user, photo_file_id: "FID")
+    allow(tg).to receive(:download_file).and_raise(TelegramClient::Forbidden, "blocked")
+    expect {
+      described_class.perform_now(quote.id)
+    }.not_to have_enqueued_job(described_class)
+    expect(quote.reload.image).not_to be_attached
+  end
+
+  it "preserves raw image bytes (binary download, no UTF-8 scrub)" do
+    quote = create(:quote, user: user, photo_file_id: "FID")
+    raw = "\xFF\xD8\xFF\xE0\x00\x10JFIF".b
+    allow(tg).to receive(:download_file).and_return(raw)
+    described_class.perform_now(quote.id)
+    expect(quote.reload.image.download.b).to eq(raw)
+  end
 end

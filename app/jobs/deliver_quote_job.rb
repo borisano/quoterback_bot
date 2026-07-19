@@ -32,10 +32,10 @@ class DeliverQuoteJob < ApplicationJob
         chat_id: user.telegram_chat_id,
         quote: quote,
         reply_markup: {
-          inline_keyboard: [[
+          inline_keyboard: [ [
             { text: "🗑 Delete", callback_data: "q:del:#{quote.id}" },
             { text: "🎲 Another", callback_data: "q:rand:#{schedule.id}" }
-          ]]
+          ] ]
         }
       )
 

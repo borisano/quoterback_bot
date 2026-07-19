@@ -59,6 +59,11 @@ module Bot
         send_photo(photo: quote.photo_file_id, caption: presenter.caption_text, markup: nil)
         send_text
       end
+    rescue TelegramClient::Forbidden
+      # The user blocked the bot — not a stale file_id. Let it propagate so the
+      # caller (DeliverQuoteJob) can deactivate them; don't waste an S3 re-upload
+      # or fire a spurious image-error alert.
+      raise
     rescue TelegramClient::Error
       recover_from_bad_file_id
     end

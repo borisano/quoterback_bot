@@ -53,6 +53,20 @@ RSpec.describe Bot::QuoteMessenger do
     end
   end
 
+  context "a photo quote whose text is exactly the 1024-char cap" do
+    # content(1000) + "\n— " (3) + author(21) == 1024 chars exactly.
+    let(:quote) { create(:quote, user: user, content: "c" * 1000, author: "a" * 21, photo_file_id: "FID") }
+
+    it "sends it as a single captioned photo (<= cap, no follow-up message)" do
+      deliver(quote)
+      expect(client).to have_received(:send_photo) do |args|
+        expect(args[:caption].length).to eq(1024)
+        expect(args[:reply_markup]).to eq(markup)
+      end
+      expect(client).not_to have_received(:send_message)
+    end
+  end
+
   context "when send_photo fails (stale file_id) and there is no durable copy" do
     let(:quote) { create(:quote, user: user, content: "A framed quote", photo_file_id: "STALE") }
 
