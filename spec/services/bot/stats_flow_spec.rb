@@ -46,6 +46,12 @@ RSpec.describe Bot::Dispatcher, "stats + free-tier limit (G9/G8)" do
       dispatcher.dispatch(update(callback_data: "set:stats", callback_query_id: "c1"))
       expect(client).to have_received(:send_message).with(hash_including(text: a_string_including("Your stats")))
     end
+
+    it "shows the image count when the user has photo quotes" do
+      create(:quote, user: user, photo_file_id: "FID")
+      dispatcher.dispatch(update(text: "/stats"))
+      expect(client).to have_received(:send_message).with(hash_including(text: a_string_including("With images: 1")))
+    end
   end
 
   describe "the free-tier limit surfaced through the dispatcher" do
@@ -81,6 +87,39 @@ RSpec.describe Bot::Dispatcher, "stats + free-tier limit (G9/G8)" do
       expect(user.reload.state).to eq("awaiting_quote_text")
       dispatcher.dispatch(update(text: "Trying to add past the limit"))
       expect(user.reload.state).to be_nil                # terminal, not a retry loop
+      expect(client).to have_received(:send_message).with(hash_including(text: a_string_including("free limit")))
+    end
+
+    it "blocks confirm-on-photo at the limit without creating a quote" do
+      allow(client).to receive(:send_photo)
+      photo = Bot::UpdateParser::ParsedUpdate.new(
+        chat_id: 111, from_id: 111, first_name: "T", language_code: "en",
+        text: nil, callback_data: nil, callback_query_id: nil, message_id: 1,
+        photo_file_id: "FID", caption: "A caption that would be a quote"
+      )
+      dispatcher.dispatch(photo)
+      cb = nil
+      expect(client).to have_received(:send_message) do |args|
+        cb ||= args.dig(:reply_markup, :inline_keyboard)&.flatten&.map { |b| b[:callback_data] }&.find { |d| d.to_s.start_with?("pc:yes:") }
+      end
+      expect {
+        dispatcher.dispatch(update(callback_data: cb, callback_query_id: "c1"))
+      }.not_to change { user.quotes.count }
+      expect(client).to have_received(:send_message).with(hash_including(text: a_string_including("free limit")))
+    end
+
+    it "blocks the photo-then-text flow at the limit and ends the state" do
+      photo = Bot::UpdateParser::ParsedUpdate.new(
+        chat_id: 111, from_id: 111, first_name: "T", language_code: "en",
+        text: nil, callback_data: nil, callback_query_id: nil, message_id: 1,
+        photo_file_id: "FID", caption: nil
+      )
+      dispatcher.dispatch(photo)
+      expect(user.reload.state).to eq("awaiting_quote_text_for_photo")
+      expect {
+        dispatcher.dispatch(update(text: "Words for the image past the limit"))
+      }.not_to change { user.quotes.count }
+      expect(user.reload.state).to be_nil
       expect(client).to have_received(:send_message).with(hash_including(text: a_string_including("free limit")))
     end
   end

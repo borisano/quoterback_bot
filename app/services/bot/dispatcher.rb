@@ -478,7 +478,10 @@ module Bot
 
       result = QuoteCreator.call(user: user, content: text, photo_file_id: entry[:file_id])
       unless result.success?
-        user.update!(state: nil) if result.limit_reached?
+        if result.limit_reached?
+          user.update!(state: nil)
+          Rails.cache.delete("pending_photo:#{update.chat_id}")
+        end
         reply_creation_failure(update, result, retry_hint: !result.limit_reached?)
         return
       end
@@ -513,6 +516,9 @@ module Bot
 
       result = QuoteCreator.call(user: user, content: entry[:caption], photo_file_id: entry[:file_id])
       unless result.success?
+        # A hit limit is terminal — drop the pending entry so a later Yes-tap can't
+        # retry it; a validation error keeps it so the user could adjust.
+        Rails.cache.delete("pending_photo_quote:#{token}") if result.limit_reached?
         reply_creation_failure(update, result)
         return
       end

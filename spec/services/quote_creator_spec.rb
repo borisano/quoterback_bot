@@ -94,5 +94,15 @@ RSpec.describe QuoteCreator do
         }.to change { user.quotes.count }.by(1)
       end
     end
+
+    context "just below the free-tier limit" do
+      before { create_list(:quote, User::FREE_QUOTE_LIMIT - 1, user: user) }
+
+      it "still allows the quote that reaches exactly the limit" do
+        result = described_class.call(user: user, content: "The twentieth quote lands")
+        expect(result).to be_success
+        expect(user.quotes.count).to eq(User::FREE_QUOTE_LIMIT)
+      end
+    end
   end
 end

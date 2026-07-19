@@ -29,10 +29,11 @@ class UserStatsQuery
 
   private
 
-  # Up to three most-used tags as [name, count] pairs.
+  # Up to three most-used tags as [name, count] pairs. Inner join so a tag that
+  # was created but never applied (count 0) doesn't show up as a "top" tag.
   def top_tags
     @user.tags
-         .left_joins(:taggings)
+         .joins(:taggings)
          .group("tags.id")
          .order(Arel.sql("COUNT(taggings.id) DESC"))
          .order("tags.name")

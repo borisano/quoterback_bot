@@ -44,6 +44,16 @@ RSpec.describe UserStatsQuery do
     expect(stats.top_tags.map(&:first)).to contain_exactly("stoic", "funny")
   end
 
+  it "excludes tags that were created but never applied (no count-0 top tags)" do
+    q = create(:quote, user: user)
+    used = create(:tag, user: user, name: "used")
+    create(:tag, user: user, name: "unused")
+    q.taggings.create!(tag: used)
+
+    stats = described_class.call(user)
+    expect(stats.top_tags.map(&:first)).to eq([ "used" ])
+  end
+
   it "handles an empty collection" do
     stats = described_class.call(user)
     expect(stats).to have_attributes(total_quotes: 0, distinct_authors: 0, top_tags: [])
