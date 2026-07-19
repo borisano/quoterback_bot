@@ -49,6 +49,9 @@ namespace :bot do
         { command: "add",         description: "Add a quote ✍️" },
         { command: "settings",    description: "Your settings ⚙️" },
         { command: "schedule",    description: "Set daily delivery ⏰" },
+        { command: "schedules",   description: "Manage daily deliveries 📅" },
+        { command: "tags",        description: "Manage your tags 🏷" },
+        { command: "stats",       description: "Your collection stats 📊" },
         { command: "settimezone", description: "Set your timezone 🌍" },
         { command: "help",        description: "How it works 📖" }
       ].to_json

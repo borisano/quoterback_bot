@@ -185,12 +185,13 @@ should set `state: "ready"`, not `nil`. **Fix:** set `"ready"` there, and treat
 `ready`/`new`/`nil` identically in routing (they already are — only `awaiting_*` states branch).
 Low risk, restores the invariant the code pretends to have.
 
-### M11. `/cancel` is overloaded, contradicting plan UX23 ✅ IMPLEMENTED (TODO left; behavior kept until G1)
-With no active state, `/cancel` disables **all** schedules. Plan UX23 explicitly reserves
-`/cancel` for aborting the current flow; schedule removal belongs to the `/schedules` manager
-(`sched:del`). Since `/schedules` doesn't exist yet (G1), this is currently the *only* way to
-stop delivery — **keep the behaviour for now**, but when G1 lands, `/cancel` with no state should
-become "Nothing to cancel. Manage deliveries in /schedules." Leave a TODO referencing UX23.
+### M11. `/cancel` is overloaded, contradicting plan UX23 ✅ RESOLVED (G1 landed)
+With no active state, `/cancel` used to disable **all** schedules. Plan UX23 reserves `/cancel`
+for aborting the current flow; schedule removal belongs to the `/schedules` manager. Now that G1
+(`/schedules` manager with pause/resume/delete) has shipped, `/cancel` with no active state
+replies "🗓 Nothing to cancel. Manage your daily deliveries in /schedules." and no longer touches
+schedules. `/cancel` mid-flow still clears the user state **and** abandons any in-progress
+schedule builder.
 
 ### M12. A quote containing "ping me in" can never be saved ✅ IMPLEMENTED
 The easter-egg branch `text.match?(/ping me in/i)` runs before confirm-on-text, so any plain
@@ -234,30 +235,68 @@ so Opus doesn't chase it as a bug.
 These are plan-mandated features with **zero implementation**. They look like phase-5+ work; the
 fixer should confirm with the author which are in scope now. Ordered by user impact:
 
-1. **`/schedules` manager + interactive `/schedule` builder** (plan §9.3, UX13/14): no `sched:*`
-   callbacks exist anywhere. No way to pause/resume/edit/delete a schedule except the overloaded
-   `/cancel` (M11). Multi-schedule + per-tag schedules are fully supported by the engine/schema
-   but unreachable from the UI (`/schedule` always reuses `first_or_initialize`, `tag_id` always
-   nil).
+1. ✅ IMPLEMENTED — **`/schedules` manager + interactive `/schedule` builder** (plan §9.3,
+   UX13/14): the `sched:*` namespace is fully wired. `/schedule` (no arg) launches a button-first
+   builder — scope chooser (`sched:tag:any` / `sched:tag:<id>`) → 24-hour grid (`sched:h:<HH>`) →
+   minute chooser (`sched:m:<MM>`) → confirm (`sched:create`), with the accumulating choice held
+   in a short-lived cache entry so no single callback carries both tag and time. `/schedule
+   HH:MM` remains a typed fallback that creates a whole-collection schedule. `/schedules` lists
+   every schedule with per-row `✏️ Edit` (`sched:edit:<id>`, updates in place), a self-documenting
+   `⏸ Pause`/`▶️ Resume` toggle (`sched:toggle:<id>`), and `🗑` delete with confirm
+   (`sched:del:<id>` → `sched:dely`/`sched:deln`). Multi-schedule + per-tag schedules are now
+   reachable from the UI; `set:sched` opens the manager. See
+   `spec/services/bot/schedule_flow_spec.rb`. Remaining follow-up: the `😴 Snooze today`
+   delivery-card action (`dnd:today`) ships with G7 (DND).
 2. ✅ IMPLEMENTED (set:tz) — **`/settings` buttons are all dead**: every `set:*` callback answers "🚧 Coming soon!". Cheap
    partial win now: wire `set:tz` → `show_timezone_picker` (handler exists) even if the rest wait.
 3. ✅ IMPLEMENTED — **`q:bytag` is a dead path**: the callback handler exists (dispatcher.rb:125) but **nothing
    ever renders a `q:bytag` button** (plan §9.1: bare `/quote` should offer a top-tags row).
    Either render the row or note the handler is forward-wiring.
-4. **Images** (plan §6.6): no photo/document extraction in `UpdateParser`, no confirm-on-photo,
-   no `AttachQuoteImageJob`, no `send_photo` delivery/caption/fallback. Schema (`photo_file_id`,
-   Active Storage tables) is ready. Also `production.rb` has `active_storage.service = :local`
-   (plan says `:amazon`) and `.env.example` lacks the AWS vars — both part of this work item.
-5. **`/import`** (plan §6.4): `awaiting_import_file` state exists in `STATES`, nothing handles it.
-6. **Tag management**: no `/tags` command; no tag-delete flow (`tag:dely`/`tag:deln` with the
-   blast-radius confirmation naming affected schedules, plan §8.5.5).
+4. ✅ IMPLEMENTED — **Images** (plan §6.6): `UpdateParser` extracts the largest PhotoSize's
+   `file_id` + caption. Three capture flows: photo+caption → confirm-on-photo (`pc:yes`/`pc:no`);
+   photo-no-caption → `awaiting_quote_text_for_photo` then the next text becomes the content;
+   `q:img:<id>` (on the saved-quote and detail cards) → `awaiting_image_for_quote` attaches the
+   next photo to an existing quote. Every path stores `photo_file_id` immediately and enqueues
+   `AttachQuoteImageJob`, which downloads the file (binary, 20 MB cap, token-safe) and attaches a
+   durable Active Storage copy (idempotent). Delivery goes through the new `Bot::QuoteMessenger`
+   (used by `/quote`, "Another", and `DeliverQuoteJob`): `send_photo` with the quote as caption;
+   if the text exceeds the 1024-char caption cap it sends a truncated caption then the full text;
+   if `send_photo` fails on a stale `file_id` it re-uploads the durable copy as a multipart file
+   (capturing the fresh `file_id`) or falls back to text-only — delivery never hard-fails.
+   `production.rb` now uses `active_storage.service = :amazon` and `.env.example` documents the AWS
+   vars. See `spec/services/bot/{image_flow,quote_messenger}_spec.rb` and
+   `spec/jobs/attach_quote_image_job_spec.rb`.
+5. ✅ IMPLEMENTED — **`/import`** (plan §6.4): `/import` (and the `set:import` settings button)
+   sets `awaiting_import_file` and prompts for a `.txt` file. A `document` upload is now extracted
+   by `UpdateParser` (`file_id`/`file_name`/`file_size`/`mime_type`), validated (plain-text only,
+   256 KB / 500-line caps), downloaded via a new token-safe `TelegramClient#download_file` (getFile
+   → file URL, UTF-8 scrubbed, URL never logged), and imported through the new `QuoteImporter`
+   service — one quote per non-blank line, routed through `QuoteCreator`, skipping too-short and
+   duplicate lines, reporting "Imported N (skipped M)". See `spec/services/quote_importer_spec.rb`
+   and `spec/services/bot/import_flow_spec.rb`.
+6. ✅ IMPLEMENTED — **Tag management**: `/tags` (and the `set:tags` settings button) lists every
+   tag with its quote count, a 🔍 browse-this-tag shortcut (`list:pg:1:<tag_id>`), and a 🗑 delete
+   button (`tag:del:<id>`). Delete asks for confirmation and **names the blast radius** of
+   affected schedules (plan §8.5.5) — "⚠️ This also removes 2 schedules (09:00, 21:00)." — then
+   `tag:dely`/`tag:deln` destroys or keeps. Destroy cascades taggings + tag-scoped schedules
+   (whose pending jobs are cancelled by `DeliverySchedule#before_destroy`); quotes keep their
+   text. See `spec/services/bot/tags_flow_spec.rb`.
 7. **`/dnd` + snooze** (plan §9.5): `dnd_weekdays` column exists, wholly unused; delivery card
    lacks `😴 Snooze today`; delivery card buttons diverge from UX15 (`Delete/Another` instead of
    `Fav/Another/Snooze`) — reconcile when building this.
-8. **Free-tier limit stub** (plan §9.7): `FREE_QUOTE_LIMIT`/`premium?` choke point — build it on
-   the `QuoteCreator` introduced by C3.
-9. **`/stats`** (plan §9.6): streak data is being collected (`streak_count`/`streak_last_date`)
-   but is never shown to anyone.
+8. ✅ IMPLEMENTED — **Free-tier limit stub** (plan §9.7): `User::FREE_QUOTE_LIMIT = 20` and a
+   stub `User#premium?` (always false). Enforced at the single `QuoteCreator` choke point, so
+   every capture path (`/add`, `awaiting_quote_text`, confirm-on-text, confirm-on-photo,
+   photo-then-text, and import) is covered. `QuoteCreator::Result` carries `limit_reached?`; the
+   dispatcher surfaces a non-dead-end "🚫 You've reached the free limit … [📋 Manage quotes]"
+   (UX19) and ends the awaiting-text flow instead of looping. Import naturally stops at the cap
+   and skips the rest. Schedules and images are NOT gated. The `/settings` and `/stats` headers
+   show `N/20`.
+9. ✅ IMPLEMENTED — **`/stats`** (plan §9.6): `/stats` (and the `set:stats` settings button) shows
+   total quotes (with the free-tier quota), distinct authors, favourites, images, deliveries, the
+   current streak 🔥, and the top three tags. Backed by the new scoped `UserStatsQuery`. Empty
+   collections get an encouraging add-your-first nudge. See `spec/queries/user_stats_query_spec.rb`
+   and `spec/services/bot/stats_flow_spec.rb`.
 10. **Typed-id fallback commands** `/tag`, `/untag`, `/fav`, `/unfav` (plan §8.5.3) — plan calls
     them optional power-user fallbacks; lowest priority.
 11. **Minor plan deltas:** `bot:quote_now[chat_id]` rake task ✅ **IMPLEMENTED**. The rest are

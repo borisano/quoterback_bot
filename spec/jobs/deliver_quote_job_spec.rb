@@ -154,6 +154,27 @@ RSpec.describe DeliverQuoteJob, type: :job do
       end
     end
 
+    context "delivering a photo quote (G4)" do
+      before do
+        allow(client).to receive(:send_photo)
+        quote.update!(photo_file_id: "FID")
+        schedule.update!(pending_job_id: "test-job-id")
+        allow_any_instance_of(described_class).to receive(:job_id).and_return("test-job-id")
+      end
+
+      it "sends the quote as a photo, not a text message" do
+        described_class.perform_now(schedule.id, date_str)
+        expect(client).to have_received(:send_photo).with(hash_including(chat_id: user.telegram_chat_id, photo: "FID"))
+      end
+
+      it "still deactivates a blocked user on Forbidden (not treated as a stale file_id)" do
+        allow(client).to receive(:send_photo).and_raise(TelegramClient::Forbidden, "blocked")
+        described_class.perform_now(schedule.id, date_str)
+        expect(user.reload.active).to be false
+        expect(QuoteScheduler).not_to have_received(:schedule_for)
+      end
+    end
+
     context "streak tracking" do
       before { schedule.update!(pending_job_id: "test-job-id") }
 

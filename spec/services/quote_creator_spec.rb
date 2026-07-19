@@ -23,6 +23,16 @@ RSpec.describe QuoteCreator do
         result = described_class.call(user: user, content: "  padded quote  ")
         expect(result.quote.content).to eq("padded quote")
       end
+
+      it "stores an optional photo_file_id (G4)" do
+        result = described_class.call(user: user, content: "A quote with a picture", photo_file_id: "FID123")
+        expect(result.quote.photo_file_id).to eq("FID123")
+      end
+
+      it "leaves photo_file_id nil when not supplied" do
+        result = described_class.call(user: user, content: "A plain quote here")
+        expect(result.quote.photo_file_id).to be_nil
+      end
     end
 
     context "with content that is too short" do
@@ -59,6 +69,39 @@ RSpec.describe QuoteCreator do
 
       it "handles nil content without raising" do
         expect { described_class.call(user: user, content: nil) }.not_to raise_error
+      end
+    end
+
+    context "at the free-tier quote limit (G8, plan §9.7)" do
+      before { create_list(:quote, User::FREE_QUOTE_LIMIT, user: user) }
+
+      it "does not create another quote for a non-premium user" do
+        expect {
+          described_class.call(user: user, content: "One quote over the line")
+        }.not_to change { user.quotes.count }
+      end
+
+      it "returns a limit_reached failure with a self-service message" do
+        result = described_class.call(user: user, content: "One quote over the line")
+        expect(result).to have_attributes(success?: false, limit_reached?: true)
+        expect(result.error_message).to include("free limit").and include("20")
+      end
+
+      it "lets a premium user keep adding" do
+        allow(user).to receive(:premium?).and_return(true)
+        expect {
+          described_class.call(user: user, content: "Premium keeps going")
+        }.to change { user.quotes.count }.by(1)
+      end
+    end
+
+    context "just below the free-tier limit" do
+      before { create_list(:quote, User::FREE_QUOTE_LIMIT - 1, user: user) }
+
+      it "still allows the quote that reaches exactly the limit" do
+        result = described_class.call(user: user, content: "The twentieth quote lands")
+        expect(result).to be_success
+        expect(user.quotes.count).to eq(User::FREE_QUOTE_LIMIT)
       end
     end
   end

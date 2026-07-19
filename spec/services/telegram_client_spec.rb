@@ -49,6 +49,71 @@ RSpec.describe TelegramClient do
     end
   end
 
+  describe "#download_file" do
+    let(:file_path) { "documents/file_7.txt" }
+    let(:file_url) { "https://api.telegram.org/file/botTEST_TOKEN/#{file_path}" }
+
+    before do
+      allow(api).to receive(:get_file).and_return(double(result: double(file_path: file_path))) # rubocop:disable RSpec/VerifiedDoubles
+    end
+
+    it "fetches the file contents via getFile then the file URL" do
+      stub_request(:get, file_url).to_return(status: 200, body: "line one\nline two")
+      expect(client.download_file("FID")).to eq("line one\nline two")
+    end
+
+    it "handles a Hash-shaped getFile response" do
+      allow(api).to receive(:get_file).and_return("result" => { "file_path" => file_path })
+      stub_request(:get, file_url).to_return(status: 200, body: "hash shaped ok")
+      expect(client.download_file("FID")).to eq("hash shaped ok")
+    end
+
+    it "handles a getFile response whose object exposes file_path directly" do
+      allow(api).to receive(:get_file).and_return(double(file_path: file_path)) # rubocop:disable RSpec/VerifiedDoubles
+      stub_request(:get, file_url).to_return(status: 200, body: "direct ok")
+      expect(client.download_file("FID")).to eq("direct ok")
+    end
+
+    it "returns nil when Telegram reports no file_path" do
+      allow(api).to receive(:get_file).and_return(double(result: double(file_path: nil))) # rubocop:disable RSpec/VerifiedDoubles
+      expect(client.download_file("FID")).to be_nil
+    end
+
+    it "raises Error when the download responds non-2xx" do
+      stub_request(:get, file_url).to_return(status: 404, body: "")
+      expect { client.download_file("FID") }.to raise_error(TelegramClient::Error)
+    end
+
+    it "raises Forbidden when getFile 403s" do
+      allow(api).to receive(:get_file).and_raise(response_error(403, "Forbidden: bot was blocked"))
+      expect { client.download_file("FID") }.to raise_error(TelegramClient::Forbidden)
+    end
+
+    it "aborts and raises Error when the body exceeds max_bytes" do
+      stub_request(:get, file_url).to_return(status: 200, body: "x" * 1000)
+      expect { client.download_file("FID", max_bytes: 100) }.to raise_error(TelegramClient::Error)
+    end
+
+    it "maps a network failure to Error (never leaks the token URL)" do
+      stub_request(:get, file_url).to_raise(SocketError.new("getaddrinfo"))
+      expect { client.download_file("FID") }.to raise_error(TelegramClient::Error) do |e|
+        expect(e.message).not_to include("TEST_TOKEN")
+      end
+    end
+
+    it "scrubs invalid UTF-8 bytes in the body" do
+      stub_request(:get, file_url).to_return(status: 200, body: "bad\xFFbyte".b)
+      expect { client.download_file("FID") }.not_to raise_error
+    end
+
+    it "never leaks the token if Telegram returns a URI-invalid file_path" do
+      allow(api).to receive(:get_file).and_return(double(result: double(file_path: "documents/bad path.txt"))) # rubocop:disable RSpec/VerifiedDoubles
+      expect { client.download_file("FID") }.to raise_error(TelegramClient::Error) do |e|
+        expect(e.message).not_to include("TEST_TOKEN")
+      end
+    end
+  end
+
   describe "'message is not modified' handling (C6)" do
     before do
       allow(api).to receive(:edit_message_text)

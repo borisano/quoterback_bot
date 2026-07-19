@@ -990,20 +990,20 @@ RSpec.describe Bot::Dispatcher do
         )
       end
 
-      it "updates existing schedule instead of creating a second one (MVP: one per user)" do
+      it "adds a second schedule (multiple schedules are supported, G1)" do
         create(:delivery_schedule, user: user, hour: 8, minute: 0)
         expect {
           dispatcher.dispatch(parsed_update(text: "/schedule 09:00"))
-        }.not_to change { user.delivery_schedules.count }
-        expect(user.delivery_schedules.last.hour).to eq(9)
+        }.to change { user.delivery_schedules.count }.by(1)
+        expect(user.delivery_schedules.order(:hour).last.hour).to eq(9)
       end
     end
 
     context "without argument" do
-      it "prompts for time" do
+      it "launches the button-first builder asking which quotes to send" do
         dispatcher.dispatch(parsed_update(text: "/schedule"))
         expect(client).to have_received(:send_message).with(
-          hash_including(text: a_string_including("time"))
+          hash_including(text: a_string_including("which quotes"))
         )
       end
     end
@@ -1020,19 +1020,19 @@ RSpec.describe Bot::Dispatcher do
     end
   end
 
-  context "with /cancel command when schedule exists" do
+  context "with /cancel command when a schedule exists but no flow is active (UX23/M11)" do
     let!(:schedule) { create(:delivery_schedule, user: user, enabled: true) }
 
-    before { allow(QuoteScheduler).to receive(:cancel_pending_for) }
-
-    it "disables the schedule" do
+    it "does NOT disable the schedule (stopping delivery moved to /schedules)" do
       dispatcher.dispatch(parsed_update(text: "/cancel"))
-      expect(schedule.reload.enabled).to be false
+      expect(schedule.reload.enabled).to be true
     end
 
-    it "calls QuoteScheduler.cancel_pending_for" do
+    it "points the user to the /schedules manager" do
       dispatcher.dispatch(parsed_update(text: "/cancel"))
-      expect(QuoteScheduler).to have_received(:cancel_pending_for)
+      expect(client).to have_received(:send_message).with(
+        hash_including(text: a_string_including("/schedules"))
+      )
     end
   end
 
@@ -1440,9 +1440,9 @@ RSpec.describe Bot::Dispatcher do
     end
   end
 
-  context "with an unimplemented set:* callback" do
+  context "with an unimplemented set:* callback (set:dnd — DND ships with G7)" do
     it "still answers with a coming-soon toast" do
-      dispatcher.dispatch(parsed_update(callback_data: "set:stats", callback_query_id: "ss1"))
+      dispatcher.dispatch(parsed_update(callback_data: "set:dnd", callback_query_id: "ss1"))
       expect(client).to have_received(:answer_callback_query).with(
         hash_including(callback_query_id: "ss1", text: a_string_including("Coming soon"))
       )
