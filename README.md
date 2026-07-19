@@ -22,9 +22,11 @@ Full research and competitor analysis: [`docs/product_research.md`](docs/product
 - `/quote` (alias `/random`) — get a random quote from your collection right now
 - `/list` (alias `/quotes`) — browse all quotes (paginated)
 - `/delete [id]` — remove a quote
-- `/settings` — dashboard: quote count, timezone, current local time, active schedule
-- `/schedule` — set daily delivery time (`09:00` in your timezone)
-- `/cancel` — turn off daily delivery
+- `/settings` — dashboard: quote count, timezone, current local time, active schedules
+- `/schedule` — set up a daily delivery: a button-first builder (pick a tag or the whole
+  collection → hour → minutes), or `/schedule 09:00` as a typed shortcut
+- `/schedules` — manage every daily delivery: edit, pause/resume, or delete each one
+- `/cancel` — abort whatever flow you're in the middle of (to stop a delivery, use `/schedules`)
 - `/settimezone` — set your timezone (accepts city names, full names, or UTC offsets like `+9`)
 - `/timezones` — list common timezones with their current times
 - Inline "Give me a quote" button on bot home screen
@@ -32,10 +34,10 @@ Full research and competitor analysis: [`docs/product_research.md`](docs/product
 
 ## Planned V2 Features
 
-- Tags/categories (`#stoic`, `#funny`, `#motivation`)
-- Favourite quotes + weighted delivery
-- Multiple daily schedules
-- Quote streaks 🔥
+- Tags/categories (`#stoic`, `#funny`, `#motivation`) — ✅ shipped (tag picker, `/quote #tag`)
+- Favourite quotes + weighted delivery — ✅ shipped
+- Multiple daily schedules (incl. per-tag schedules) — ✅ shipped (`/schedules`)
+- Quote streaks 🔥 (collected; `/stats` surfacing planned)
 - Do Not Disturb days
 
 ## Planned V3 / AI Features

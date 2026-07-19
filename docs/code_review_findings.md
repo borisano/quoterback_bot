@@ -185,12 +185,13 @@ should set `state: "ready"`, not `nil`. **Fix:** set `"ready"` there, and treat
 `ready`/`new`/`nil` identically in routing (they already are — only `awaiting_*` states branch).
 Low risk, restores the invariant the code pretends to have.
 
-### M11. `/cancel` is overloaded, contradicting plan UX23 ✅ IMPLEMENTED (TODO left; behavior kept until G1)
-With no active state, `/cancel` disables **all** schedules. Plan UX23 explicitly reserves
-`/cancel` for aborting the current flow; schedule removal belongs to the `/schedules` manager
-(`sched:del`). Since `/schedules` doesn't exist yet (G1), this is currently the *only* way to
-stop delivery — **keep the behaviour for now**, but when G1 lands, `/cancel` with no state should
-become "Nothing to cancel. Manage deliveries in /schedules." Leave a TODO referencing UX23.
+### M11. `/cancel` is overloaded, contradicting plan UX23 ✅ RESOLVED (G1 landed)
+With no active state, `/cancel` used to disable **all** schedules. Plan UX23 reserves `/cancel`
+for aborting the current flow; schedule removal belongs to the `/schedules` manager. Now that G1
+(`/schedules` manager with pause/resume/delete) has shipped, `/cancel` with no active state
+replies "🗓 Nothing to cancel. Manage your daily deliveries in /schedules." and no longer touches
+schedules. `/cancel` mid-flow still clears the user state **and** abandons any in-progress
+schedule builder.
 
 ### M12. A quote containing "ping me in" can never be saved ✅ IMPLEMENTED
 The easter-egg branch `text.match?(/ping me in/i)` runs before confirm-on-text, so any plain
@@ -234,11 +235,18 @@ so Opus doesn't chase it as a bug.
 These are plan-mandated features with **zero implementation**. They look like phase-5+ work; the
 fixer should confirm with the author which are in scope now. Ordered by user impact:
 
-1. **`/schedules` manager + interactive `/schedule` builder** (plan §9.3, UX13/14): no `sched:*`
-   callbacks exist anywhere. No way to pause/resume/edit/delete a schedule except the overloaded
-   `/cancel` (M11). Multi-schedule + per-tag schedules are fully supported by the engine/schema
-   but unreachable from the UI (`/schedule` always reuses `first_or_initialize`, `tag_id` always
-   nil).
+1. ✅ IMPLEMENTED — **`/schedules` manager + interactive `/schedule` builder** (plan §9.3,
+   UX13/14): the `sched:*` namespace is fully wired. `/schedule` (no arg) launches a button-first
+   builder — scope chooser (`sched:tag:any` / `sched:tag:<id>`) → 24-hour grid (`sched:h:<HH>`) →
+   minute chooser (`sched:m:<MM>`) → confirm (`sched:create`), with the accumulating choice held
+   in a short-lived cache entry so no single callback carries both tag and time. `/schedule
+   HH:MM` remains a typed fallback that creates a whole-collection schedule. `/schedules` lists
+   every schedule with per-row `✏️ Edit` (`sched:edit:<id>`, updates in place), a self-documenting
+   `⏸ Pause`/`▶️ Resume` toggle (`sched:toggle:<id>`), and `🗑` delete with confirm
+   (`sched:del:<id>` → `sched:dely`/`sched:deln`). Multi-schedule + per-tag schedules are now
+   reachable from the UI; `set:sched` opens the manager. See
+   `spec/services/bot/schedule_flow_spec.rb`. Remaining follow-up: the `😴 Snooze today`
+   delivery-card action (`dnd:today`) ships with G7 (DND).
 2. ✅ IMPLEMENTED (set:tz) — **`/settings` buttons are all dead**: every `set:*` callback answers "🚧 Coming soon!". Cheap
    partial win now: wire `set:tz` → `show_timezone_picker` (handler exists) even if the rest wait.
 3. ✅ IMPLEMENTED — **`q:bytag` is a dead path**: the callback handler exists (dispatcher.rb:125) but **nothing

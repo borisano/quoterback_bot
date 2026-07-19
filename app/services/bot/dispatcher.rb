@@ -73,23 +73,18 @@ module Bot
       if command.downcase == "/cancel"
         if user.state.present?
           user.update!(state: nil)
+          # Abandon any in-progress schedule builder too, so /cancel fully resets.
+          clear_sched_builder(update)
           client.send_message(chat_id: update.chat_id, text: "👍 Cancelled.")
         else
-          # TODO(UX23/G1): /cancel is reserved for aborting the current flow.
-          # Stopping delivery belongs in the /schedules manager (sched:del). Until
-          # that exists this is the only way to stop daily delivery, so keep it;
-          # once /schedules ships, replace this with "Nothing to cancel. Manage
-          # deliveries in /schedules." (M11)
-          schedules = user.delivery_schedules.where(enabled: true)
-          if schedules.any?
-            schedules.each do |sched|
-              QuoteScheduler.cancel_pending_for(sched)
-              sched.update!(enabled: false)
-            end
-            client.send_message(chat_id: update.chat_id, text: "⏹ Daily delivery stopped.")
-          else
-            client.send_message(chat_id: update.chat_id, text: "You don't have an active schedule.")
-          end
+          # /cancel is reserved for aborting the current flow (UX23). Stopping or
+          # pausing daily delivery now lives in the /schedules manager, so point
+          # the user there rather than silently toggling schedules (M11/G1).
+          client.send_message(
+            chat_id: update.chat_id,
+            text: "🗓 Nothing to cancel. Manage your daily deliveries in /schedules.",
+            reply_markup: { inline_keyboard: [ [ { text: "📅 My schedules", callback_data: "set:sched" } ] ] }
+          )
         end
         return
       end
@@ -119,6 +114,7 @@ module Bot
       when "/menu"                         then handle_menu(update, user)
       when "/settimezone", "/timezone"     then handle_settimezone(update, user, rest)
       when "/schedule"                     then handle_schedule_command(update, user, rest)
+      when "/schedules"                    then handle_schedules_command(update, user)
       when "/cancel"                       then # already handled above
       else
         # Anchor at the start so a quote merely containing "ping me in" isn't
@@ -195,6 +191,31 @@ module Bot
       when /\Aset:tz\z/
         client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
         show_timezone_picker(update, user)
+      when /\Aset:sched\z/
+        client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
+        show_schedules_manager(update, user)
+      when /\Asched:new\z/
+        handle_schedule_new(update, user)
+      when /\Asched:tag:(any|\d+)\z/
+        handle_schedule_pick_tag(update, user, $1)
+      when /\Asched:h:(\d{1,2})\z/
+        handle_schedule_pick_hour(update, user, $1.to_i)
+      when /\Asched:m:(\d{1,2})\z/
+        handle_schedule_pick_minute(update, user, $1.to_i)
+      when /\Asched:create\z/
+        handle_schedule_create(update, user)
+      when /\Asched:cancel\z/
+        handle_schedule_builder_cancel(update, user)
+      when /\Asched:edit:(\d+)\z/
+        handle_schedule_edit(update, user, $1.to_i)
+      when /\Asched:toggle:(\d+)\z/
+        handle_schedule_toggle(update, user, $1.to_i)
+      when /\Asched:del:(\d+)\z/
+        handle_schedule_delete_confirm(update, user, $1.to_i)
+      when /\Asched:dely:(\d+)\z/
+        handle_schedule_delete_yes(update, user, $1.to_i)
+      when /\Asched:deln:(\d+)\z/
+        handle_schedule_delete_no(update, user, $1.to_i)
       when /\Aset:(.+)\z/
         client.answer_callback_query(callback_query_id: update.callback_query_id, text: "🚧 Coming soon!")
       else
@@ -757,6 +778,7 @@ module Bot
              "/list — browse your collection\n\n" \
              "Deliver\n" \
              "/schedule — set daily delivery time\n" \
+             "/schedules — manage your deliveries\n" \
              "/settimezone — set your timezone\n\n" \
              "Manage\n" \
              "/settings — your settings & stats\n" \
@@ -1032,54 +1054,372 @@ module Bot
       end
     end
 
+    # ── Scheduling: builder + manager (G1, plan §9.3) ────────────────────────────
+    #
+    # `/schedule` (no arg) launches the button-first builder: pick a scope (tag or
+    # the whole collection) → pick an hour → pick minutes → confirm. The chosen
+    # values accumulate in a short-lived cache entry so no single callback has to
+    # carry both tag and time (plan §8/§9.3). `/schedule HH:MM` remains a typed
+    # power-user fallback that creates a whole-collection schedule directly.
+    # `/schedules` lists every schedule with per-row edit / pause-resume / delete.
+
+    SCHED_BUILDER_TTL = 15.minutes
+    SCHED_MINUTES = [ 0, 15, 30, 45 ].freeze
+
     def handle_schedule_command(update, user, time_str)
-      unless user.timezone.present?
-        client.send_message(
-          chat_id: update.chat_id,
-          text: "🌍 Please set your timezone first with /settimezone before scheduling.",
-          reply_markup: { inline_keyboard: [ [ { text: "🌍 Set timezone", callback_data: "ob:tz" } ] ] }
-        )
-        return
-      end
+      return unless require_timezone(update, user)
 
       if time_str.blank?
-        client.send_message(
-          chat_id: update.chat_id,
-          text: "⏰ What time should I send your daily quote?\n\nUse format HH:MM, e.g. /schedule 09:00"
-        )
+        start_schedule_builder(update, user)
         return
       end
 
       match = time_str.strip.match(/\A(\d{1,2}):(\d{2})\z/)
       unless match
         client.send_message(chat_id: update.chat_id,
-          text: "❓ Couldn't parse that time. Please use HH:MM format, e.g. /schedule 09:00")
+          text: "❓ Couldn't parse that time. Please use HH:MM format, e.g. /schedule 09:00 — or just /schedule to pick from buttons.")
         return
       end
 
       hour   = match[1].to_i
       minute = match[2].to_i
 
-      unless (0..23).include?(hour) && (0..59).include?(minute)
+      unless (0..23).cover?(hour) && (0..59).cover?(minute)
         client.send_message(chat_id: update.chat_id,
           text: "❓ Invalid time. Hour must be 0–23, minute 0–59.")
         return
       end
 
-      schedule = user.delivery_schedules.first_or_initialize
-      schedule.assign_attributes(hour: hour, minute: minute, enabled: true)
-      schedule.save!
-
+      schedule = user.delivery_schedules.create!(hour: hour, minute: minute, enabled: true)
       QuoteScheduler.schedule_for(schedule)
 
-      tz = ActiveSupport::TimeZone[user.timezone]
-      local_now = Time.current.in_time_zone(tz)
       client.send_message(
         chat_id: update.chat_id,
-        text: "✅ Daily quote scheduled for #{format('%02d:%02d', hour, minute)} " \
-              "(#{tz.name}, your current time: #{local_now.strftime('%H:%M')}).\n\n" \
-              "Use /cancel to stop daily delivery."
+        text: schedule_created_text(user, schedule),
+        reply_markup: { inline_keyboard: [ [ { text: "📅 My schedules", callback_data: "set:sched" } ] ] }
       )
+    end
+
+    def handle_schedules_command(update, user)
+      return unless require_timezone(update, user)
+      show_schedules_manager(update, user)
+    end
+
+    # Guard shared by every scheduling entry point: delivery is timezone-aware, so
+    # a schedule is meaningless until the user has set one.
+    def require_timezone(update, user)
+      return true if user.timezone.present?
+
+      client.send_message(
+        chat_id: update.chat_id,
+        text: "🌍 Please set your timezone first with /settimezone before scheduling.",
+        reply_markup: { inline_keyboard: [ [ { text: "🌍 Set timezone", callback_data: "ob:tz" } ] ] }
+      )
+      false
+    end
+
+    # ── Builder ──────────────────────────────────────────────────────────────────
+
+    def start_schedule_builder(update, user, edit_id: nil)
+      write_sched_builder(update, { edit_id: edit_id })
+      show_schedule_tag_chooser(update, user, edit: false)
+    end
+
+    def handle_schedule_new(update, user)
+      unless user.timezone.present?
+        client.answer_callback_query(callback_query_id: update.callback_query_id, text: "Set a timezone first")
+        require_timezone(update, user)
+        return
+      end
+      client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
+      # Preserve an in-progress edit target if the user tapped "Change".
+      edit_id = read_sched_builder(update)[:edit_id]
+      write_sched_builder(update, { edit_id: edit_id })
+      show_schedule_tag_chooser(update, user, edit: true)
+    end
+
+    def show_schedule_tag_chooser(update, user, edit:)
+      buttons = [ [ { text: "🌐 Any (whole collection)", callback_data: "sched:tag:any" } ] ]
+      user.tags.order(:name).each do |tag|
+        buttons << [ { text: "##{tag.name}", callback_data: "sched:tag:#{tag.id}" } ]
+      end
+      buttons << [ { text: "✖️ Cancel", callback_data: "sched:cancel" } ]
+
+      text = "🗓 New daily delivery — which quotes should I send?"
+      send_or_edit(update, text, { inline_keyboard: buttons }, edit: edit)
+    end
+
+    def handle_schedule_pick_tag(update, user, tag_arg)
+      builder = read_sched_builder(update)
+      return builder_expired(update) if builder.blank?
+
+      if tag_arg == "any"
+        builder[:tag_id] = nil
+      else
+        tag = user.tags.find_by(id: tag_arg.to_i)
+        unless tag
+          client.answer_callback_query(callback_query_id: update.callback_query_id, text: "That tag is gone")
+          return show_schedule_tag_chooser(update, user, edit: true)
+        end
+        builder[:tag_id] = tag.id
+      end
+
+      write_sched_builder(update, builder)
+      client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
+      show_schedule_hour_grid(update)
+    end
+
+    def show_schedule_hour_grid(update)
+      buttons = (0..23).map { |h| { text: format("%02d", h), callback_data: "sched:h:#{h}" } }
+                       .each_slice(6).to_a
+      buttons << [ { text: "✖️ Cancel", callback_data: "sched:cancel" } ]
+      send_or_edit(update, "🗓 What hour should I deliver? (24-hour clock)", { inline_keyboard: buttons }, edit: true)
+    end
+
+    def handle_schedule_pick_hour(update, user, hour)
+      builder = read_sched_builder(update)
+      return builder_expired(update) if builder.blank?
+      return builder_expired(update) unless (0..23).cover?(hour)
+
+      builder[:hour] = hour
+      write_sched_builder(update, builder)
+      client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
+      show_schedule_minute_chooser(update)
+    end
+
+    def show_schedule_minute_chooser(update)
+      row = SCHED_MINUTES.map { |m| { text: format(":%02d", m), callback_data: "sched:m:#{m}" } }
+      buttons = [ row, [ { text: "✖️ Cancel", callback_data: "sched:cancel" } ] ]
+      send_or_edit(update, "🗓 And the minutes?", { inline_keyboard: buttons }, edit: true)
+    end
+
+    def handle_schedule_pick_minute(update, user, minute)
+      builder = read_sched_builder(update)
+      return builder_expired(update) if builder.blank?
+      return builder_expired(update) if builder[:hour].nil?
+      return builder_expired(update) unless (0..59).cover?(minute)
+
+      builder[:minute] = minute
+      write_sched_builder(update, builder)
+      client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
+      show_schedule_confirm(update, user)
+    end
+
+    def show_schedule_confirm(update, user)
+      builder = read_sched_builder(update)
+      return builder_expired(update) if builder.blank? || builder[:hour].nil?
+
+      time  = format("%02d:%02d", builder[:hour], builder[:minute].to_i)
+      scope = builder_scope_label(user, builder)
+      verb  = builder[:edit_id] ? "Update" : "Create"
+
+      send_or_edit(
+        update,
+        "📅 Deliver daily at #{time} · #{scope}.\n\nReady?",
+        { inline_keyboard: [ [
+          { text: "✅ #{verb}", callback_data: "sched:create" },
+          { text: "✏️ Change", callback_data: "sched:new" },
+          { text: "✖️ Cancel", callback_data: "sched:cancel" }
+        ] ] },
+        edit: true
+      )
+    end
+
+    def handle_schedule_create(update, user)
+      builder = read_sched_builder(update)
+      return builder_expired(update) if builder.blank? || builder[:hour].nil?
+
+      hour   = builder[:hour]
+      minute = builder[:minute].to_i
+      tag    = builder[:tag_id] ? user.tags.find_by(id: builder[:tag_id]) : nil
+
+      schedule =
+        if builder[:edit_id]
+          user.delivery_schedules.find_by(id: builder[:edit_id]) || user.delivery_schedules.new
+        else
+          user.delivery_schedules.new
+        end
+
+      schedule.assign_attributes(hour: hour, minute: minute, tag: tag, enabled: true)
+      schedule.save!
+      QuoteScheduler.schedule_for(schedule)
+
+      clear_sched_builder(update)
+      client.answer_callback_query(callback_query_id: update.callback_query_id, text: "✅ Saved")
+      client.edit_message_text(
+        chat_id: update.chat_id,
+        message_id: update.message_id,
+        text: schedule_created_text(user, schedule),
+        reply_markup: { inline_keyboard: [ [ { text: "📅 My schedules", callback_data: "set:sched" } ] ] }
+      )
+    end
+
+    def handle_schedule_builder_cancel(update, user)
+      clear_sched_builder(update)
+      client.answer_callback_query(callback_query_id: update.callback_query_id, text: "Cancelled")
+      client.edit_message_text(
+        chat_id: update.chat_id,
+        message_id: update.message_id,
+        text: "🗓 Schedule setup cancelled."
+      )
+    end
+
+    def builder_expired(update)
+      clear_sched_builder(update)
+      client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
+      client.send_message(
+        chat_id: update.chat_id,
+        text: "🗓 That schedule setup expired — start again with /schedule.",
+        reply_markup: { inline_keyboard: [ [ { text: "🗓 New schedule", callback_data: "sched:new" } ] ] }
+      )
+      nil
+    end
+
+    # ── Manager ──────────────────────────────────────────────────────────────────
+
+    def show_schedules_manager(update, user, edit: false)
+      schedules = user.delivery_schedules.order(:hour, :minute, :id)
+
+      if schedules.empty?
+        send_or_edit(
+          update,
+          "📭 You have no delivery schedules yet.\n\nSet one up and I'll send you a quote every day.",
+          { inline_keyboard: [ [ { text: "🗓 New schedule", callback_data: "sched:new" } ] ] },
+          edit: edit
+        )
+        return
+      end
+
+      lines = schedules.each_with_index.map do |s, i|
+        status = s.enabled? ? "" : " · ⏸ paused"
+        "#{i + 1}. #{schedule_label(s)}#{status}"
+      end
+      text = "📅 Your delivery schedules\n\n#{lines.join("\n")}"
+
+      keyboard = schedules.flat_map do |s|
+        toggle = s.enabled? ? { text: "⏸ Pause", callback_data: "sched:toggle:#{s.id}" }
+                            : { text: "▶️ Resume", callback_data: "sched:toggle:#{s.id}" }
+        [ [
+          { text: "✏️ #{schedule_label(s)}", callback_data: "sched:edit:#{s.id}" },
+          toggle,
+          { text: "🗑", callback_data: "sched:del:#{s.id}" }
+        ] ]
+      end
+      keyboard << [ { text: "➕ New schedule", callback_data: "sched:new" } ]
+
+      send_or_edit(update, text, { inline_keyboard: keyboard }, edit: edit)
+    end
+
+    def handle_schedule_edit(update, user, schedule_id)
+      schedule = user.delivery_schedules.find_by(id: schedule_id)
+      unless schedule
+        client.answer_callback_query(callback_query_id: update.callback_query_id, text: "That schedule is gone")
+        return show_schedules_manager(update, user, edit: true)
+      end
+
+      client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
+      write_sched_builder(update, { edit_id: schedule.id })
+      show_schedule_tag_chooser(update, user, edit: true)
+    end
+
+    def handle_schedule_toggle(update, user, schedule_id)
+      schedule = user.delivery_schedules.find_by(id: schedule_id)
+      unless schedule
+        client.answer_callback_query(callback_query_id: update.callback_query_id, text: "That schedule is gone")
+        return show_schedules_manager(update, user, edit: true)
+      end
+
+      if schedule.enabled?
+        QuoteScheduler.cancel_pending_for(schedule)
+        schedule.update!(enabled: false)
+        toast = "⏸ Paused"
+      else
+        schedule.update!(enabled: true)
+        QuoteScheduler.schedule_for(schedule)
+        toast = "▶️ Resumed"
+      end
+
+      client.answer_callback_query(callback_query_id: update.callback_query_id, text: toast)
+      show_schedules_manager(update, user, edit: true)
+    end
+
+    def handle_schedule_delete_confirm(update, user, schedule_id)
+      schedule = user.delivery_schedules.find_by(id: schedule_id)
+      unless schedule
+        client.answer_callback_query(callback_query_id: update.callback_query_id, text: "That schedule is gone")
+        return show_schedules_manager(update, user, edit: true)
+      end
+
+      client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
+      client.edit_message_text(
+        chat_id: update.chat_id,
+        message_id: update.message_id,
+        text: "🗑 Delete this schedule?\n\n📅 #{schedule_label(schedule)}",
+        reply_markup: { inline_keyboard: [ [
+          { text: "🗑 Yes, delete", callback_data: "sched:dely:#{schedule.id}" },
+          { text: "Cancel", callback_data: "sched:deln:#{schedule.id}" }
+        ] ] }
+      )
+    end
+
+    def handle_schedule_delete_yes(update, user, schedule_id)
+      schedule = user.delivery_schedules.find_by(id: schedule_id)
+      schedule&.destroy # before_destroy cancels the pending job (§7.4)
+      client.answer_callback_query(callback_query_id: update.callback_query_id, text: "🗑 Deleted")
+      show_schedules_manager(update, user, edit: true)
+    end
+
+    def handle_schedule_delete_no(update, user, schedule_id)
+      client.answer_callback_query(callback_query_id: update.callback_query_id, text: "👍 Kept")
+      show_schedules_manager(update, user, edit: true)
+    end
+
+    # ── Scheduling helpers ───────────────────────────────────────────────────────
+
+    def schedule_label(schedule)
+      time  = format("%02d:%02d", schedule.hour, schedule.minute)
+      scope = schedule.tag ? "##{schedule.tag.name}" : "Any"
+      "#{time} · #{scope}"
+    end
+
+    def builder_scope_label(user, builder)
+      return "Any (whole collection)" if builder[:tag_id].nil?
+      tag = user.tags.find_by(id: builder[:tag_id])
+      tag ? "##{tag.name}" : "Any (whole collection)"
+    end
+
+    def schedule_created_text(user, schedule)
+      tz = ActiveSupport::TimeZone[user.timezone]
+      local_now = Time.current.in_time_zone(tz)
+      "✅ Daily quote scheduled — #{schedule_label(schedule)} " \
+        "(#{tz.name}, your current time: #{local_now.strftime('%H:%M')}).\n\n" \
+        "Manage it any time in /schedules."
+    end
+
+    def sched_builder_key(update)
+      "sched_builder:#{update.chat_id}"
+    end
+
+    def read_sched_builder(update)
+      Rails.cache.read(sched_builder_key(update)) || {}
+    end
+
+    def write_sched_builder(update, data)
+      Rails.cache.write(sched_builder_key(update), data, expires_in: SCHED_BUILDER_TTL)
+    end
+
+    def clear_sched_builder(update)
+      Rails.cache.delete(sched_builder_key(update))
+    end
+
+    # Sends a fresh message or edits the current one, used across the button-first
+    # builder/manager so a tap updates in place while a command starts fresh.
+    def send_or_edit(update, text, reply_markup, edit:)
+      if edit
+        client.edit_message_text(chat_id: update.chat_id, message_id: update.message_id, text: text, reply_markup: reply_markup)
+      else
+        client.send_message(chat_id: update.chat_id, text: text, reply_markup: reply_markup)
+      end
     end
 
     def local_date_for(user)
