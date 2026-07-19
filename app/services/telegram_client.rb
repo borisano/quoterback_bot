@@ -1,4 +1,5 @@
 require "telegram/bot"
+require "net/http"
 
 # Thin facade over Telegram::Bot::Api. Delegates all Bot API methods to the gem
 # and maps errors to typed exceptions so callers can branch on 403 (user blocked)
@@ -38,7 +39,41 @@ class TelegramClient
     @api.respond_to?(name) || super
   end
 
+  # Downloads a file's raw contents by file_id: getFile → build the file URL →
+  # fetch it. Returns a UTF-8 String (invalid bytes scrubbed) or nil if Telegram
+  # returned no file_path.
+  # ⚠️ The download URL embeds the bot token — it is NEVER logged.
+  def download_file(file_id)
+    resp = get_file(file_id: file_id)
+    file_path = extract_file_path(resp)
+    return nil if file_path.nil? || file_path.to_s.empty?
+
+    uri = URI.parse("https://api.telegram.org/file/bot#{token}/#{file_path}")
+    response = Net::HTTP.get_response(uri)
+    raise Error, "file download failed (#{response.code})" unless response.is_a?(Net::HTTPSuccess)
+
+    response.body.to_s.encode("UTF-8", invalid: :replace, undef: :replace)
+  rescue Telegram::Bot::Exceptions::ResponseError => e
+    raise Forbidden, e.message if e.response.status == 403
+    raise Error, e.message
+  end
+
   private
+
+  # getFile responses vary by gem version (typed object vs Hash); pull file_path
+  # out of whichever shape we got.
+  def extract_file_path(resp)
+    return resp.file_path if resp.respond_to?(:file_path)
+
+    result =
+      if resp.respond_to?(:result) then resp.result
+      elsif resp.is_a?(Hash) then resp["result"] || resp[:result]
+      end
+    return nil if result.nil?
+    return result.file_path if result.respond_to?(:file_path)
+
+    result["file_path"] || result[:file_path] if result.respond_to?(:[])
+  end
 
   # telegram-bot-ruby only auto-serializes reply_markup for its own typed objects.
   # Plain Ruby hashes must be JSON-encoded explicitly or Faraday form-encodes them

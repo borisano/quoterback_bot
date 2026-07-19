@@ -83,6 +83,31 @@ RSpec.describe Bot::UpdateParser do
       end
     end
 
+    context "with a document message (G5)" do
+      let(:update) do
+        {
+          message: {
+            message_id: 900,
+            chat: { id: 555 },
+            from: { id: 555, first_name: "Ann" },
+            document: { file_id: "FID123", file_name: "quotes.txt", file_size: 2048, mime_type: "text/plain" }
+          }
+        }
+      end
+
+      it "extracts the document metadata" do
+        result = described_class.parse(update)
+        expect(result.document).to eq(
+          file_id: "FID123", file_name: "quotes.txt", file_size: 2048, mime_type: "text/plain"
+        )
+      end
+
+      it "leaves document nil for a plain text message" do
+        result = described_class.parse(message: { chat: { id: 1 }, from: { id: 1 }, text: "hi" })
+        expect(result.document).to be_nil
+      end
+    end
+
     context "with an empty hash" do
       it "returns nil" do
         expect(described_class.parse({})).to be_nil

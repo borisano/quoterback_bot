@@ -49,6 +49,35 @@ RSpec.describe TelegramClient do
     end
   end
 
+  describe "#download_file" do
+    let(:file_path) { "documents/file_7.txt" }
+    let(:file_url) { "https://api.telegram.org/file/botTEST_TOKEN/#{file_path}" }
+
+    before do
+      allow(api).to receive(:get_file).and_return(double(result: double(file_path: file_path))) # rubocop:disable RSpec/VerifiedDoubles
+    end
+
+    it "fetches the file contents via getFile then the file URL" do
+      stub_request(:get, file_url).to_return(status: 200, body: "line one\nline two")
+      expect(client.download_file("FID")).to eq("line one\nline two")
+    end
+
+    it "returns nil when Telegram reports no file_path" do
+      allow(api).to receive(:get_file).and_return(double(result: double(file_path: nil))) # rubocop:disable RSpec/VerifiedDoubles
+      expect(client.download_file("FID")).to be_nil
+    end
+
+    it "raises Error when the download responds non-2xx" do
+      stub_request(:get, file_url).to_return(status: 404, body: "")
+      expect { client.download_file("FID") }.to raise_error(TelegramClient::Error)
+    end
+
+    it "scrubs invalid UTF-8 bytes in the body" do
+      stub_request(:get, file_url).to_return(status: 200, body: "bad\xFFbyte".b)
+      expect { client.download_file("FID") }.not_to raise_error
+    end
+  end
+
   describe "'message is not modified' handling (C6)" do
     before do
       allow(api).to receive(:edit_message_text)

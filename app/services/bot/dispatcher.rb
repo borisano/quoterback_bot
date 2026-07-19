@@ -34,6 +34,8 @@ module Bot
         handle_callback(update, user)
       elsif update.text.present?
         handle_text(update, user)
+      elsif update.document
+        handle_document(update, user)
       else
         handle_unsupported_message(update)
       end
@@ -89,6 +91,11 @@ module Bot
         return
       end
 
+      # A text message while we're waiting for an import file means the user
+      # changed their mind — drop the flag so they aren't stuck, then fall through
+      # to normal routing (the text is treated as a command or a quote to save).
+      user.update!(state: nil) if user.state == "awaiting_import_file"
+
       # State machine takes priority over commands (except /cancel above)
       case user.state
       when "awaiting_timezone"
@@ -115,6 +122,7 @@ module Bot
       when "/settimezone", "/timezone"     then handle_settimezone(update, user, rest)
       when "/schedule"                     then handle_schedule_command(update, user, rest)
       when "/schedules"                    then handle_schedules_command(update, user)
+      when "/import"                       then handle_import_command(update, user)
       when "/cancel"                       then # already handled above
       else
         # Anchor at the start so a quote merely containing "ping me in" isn't
@@ -194,6 +202,9 @@ module Bot
       when /\Aset:sched\z/
         client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
         show_schedules_manager(update, user)
+      when /\Aset:import\z/
+        client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
+        handle_import_command(update, user)
       when /\Asched:new\z/
         handle_schedule_new(update, user)
       when /\Asched:tag:(any|\d+)\z/
@@ -298,6 +309,87 @@ module Bot
         chat_id: update.chat_id,
         text: "📝 I can only save text quotes right now — send me the text and I'll save it!"
       )
+    end
+
+    # ── Import from a text file (G5, plan §6.4) ──────────────────────────────────
+
+    def handle_import_command(update, user)
+      user.update!(state: "awaiting_import_file")
+      client.send_message(
+        chat_id: update.chat_id,
+        text: "📥 Send me a .txt file with one quote per line and I'll add them all in one go.\n\n" \
+              "Up to #{QuoteImporter::MAX_LINES} quotes per file (256 KB max)."
+      )
+    end
+
+    def handle_document(update, user)
+      doc = update.document
+
+      unless import_text_file?(doc)
+        clear_import_state(user)
+        client.send_message(
+          chat_id: update.chat_id,
+          text: "📄 I can only import plain .txt files (one quote per line) right now."
+        )
+        return
+      end
+
+      if doc[:file_size].to_i > QuoteImporter::MAX_BYTES
+        clear_import_state(user)
+        client.send_message(chat_id: update.chat_id, text: "❌ That file is too large — imports are capped at 256 KB.")
+        return
+      end
+
+      content =
+        begin
+          client.download_file(doc[:file_id])
+        rescue TelegramClient::Error => e
+          Rails.logger.error("[Bot::Dispatcher] import download failed: #{e.message}")
+          nil
+        end
+
+      if content.nil? || content.strip.empty?
+        clear_import_state(user)
+        client.send_message(chat_id: update.chat_id, text: "🤔 I couldn't read that file — please try again.")
+        return
+      end
+
+      result = QuoteImporter.call(user: user, content: content)
+      clear_import_state(user)
+
+      unless result.success?
+        client.send_message(chat_id: update.chat_id, text: "❌ #{result.error_message}")
+        return
+      end
+
+      if result.imported.zero?
+        client.send_message(
+          chat_id: update.chat_id,
+          text: "🤷 No new quotes added — those #{result.skipped} line#{'s' unless result.skipped == 1} were already saved or too short."
+        )
+        return
+      end
+
+      summary = "✅ Imported #{result.imported} quote#{'s' unless result.imported == 1}"
+      summary += " (skipped #{result.skipped})" if result.skipped.positive?
+      summary += "."
+      client.send_message(
+        chat_id: update.chat_id,
+        text: summary,
+        reply_markup: { inline_keyboard: [ [ { text: "📋 My quotes", callback_data: "list:pg:1" } ] ] }
+      )
+    end
+
+    def import_text_file?(doc)
+      return false if doc.nil?
+
+      name = doc[:file_name].to_s.downcase
+      mime = doc[:mime_type].to_s.downcase
+      name.end_with?(".txt") || mime == "text/plain"
+    end
+
+    def clear_import_state(user)
+      user.update!(state: nil) if user.state == "awaiting_import_file"
     end
 
     # Action row shown on a just-saved quote so the user can tag/fav/delete or
@@ -772,7 +864,8 @@ module Bot
       text = "📖 QuoterBack Help\n\n" \
              "Capture\n" \
              "Just send me any text → I'll ask if it's a quote\n" \
-             "/add — add a quote\n\n" \
+             "/add — add a quote\n" \
+             "/import — bulk-add from a .txt file\n\n" \
              "Browse\n" \
              "/quote — random quote\n" \
              "/list — browse your collection\n\n" \

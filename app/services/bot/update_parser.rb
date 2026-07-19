@@ -3,9 +3,16 @@ module Bot
   # whether it came from the long-polling runner (telegram-bot-ruby objects) or
   # the webhook controller (ActionController::Parameters / plain Hash).
   class UpdateParser
+    # `document` is a Hash ({ file_id:, file_name:, file_size:, mime_type: }) when
+    # the message carries an uploaded file, else nil. It defaults to nil so every
+    # existing constructor (and spec) that omits it keeps working.
     ParsedUpdate = Data.define(
-      :chat_id, :from_id, :first_name, :language_code, :text, :callback_data, :callback_query_id, :message_id
-    )
+      :chat_id, :from_id, :first_name, :language_code, :text, :callback_data, :callback_query_id, :message_id, :document
+    ) do
+      def initialize(document: nil, **rest)
+        super(document: document, **rest)
+      end
+    end
 
     def self.parse(update)
       new(update).parse
@@ -50,8 +57,21 @@ module Bot
         text:              get(msg, :text),
         callback_data:     nil,
         callback_query_id: nil,
-        message_id:        get(msg, :message_id)
+        message_id:        get(msg, :message_id),
+        document:          parse_document(msg)
       )
+    end
+
+    def parse_document(msg)
+      doc = get(msg, :document)
+      return nil if doc.nil?
+
+      {
+        file_id:   get(doc, :file_id),
+        file_name: get(doc, :file_name),
+        file_size: get(doc, :file_size),
+        mime_type: get(doc, :mime_type)
+      }
     end
 
     # Handles telegram-bot-ruby typed objects (respond to method names),

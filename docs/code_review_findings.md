@@ -256,7 +256,14 @@ fixer should confirm with the author which are in scope now. Ordered by user imp
    no `AttachQuoteImageJob`, no `send_photo` delivery/caption/fallback. Schema (`photo_file_id`,
    Active Storage tables) is ready. Also `production.rb` has `active_storage.service = :local`
    (plan says `:amazon`) and `.env.example` lacks the AWS vars — both part of this work item.
-5. **`/import`** (plan §6.4): `awaiting_import_file` state exists in `STATES`, nothing handles it.
+5. ✅ IMPLEMENTED — **`/import`** (plan §6.4): `/import` (and the `set:import` settings button)
+   sets `awaiting_import_file` and prompts for a `.txt` file. A `document` upload is now extracted
+   by `UpdateParser` (`file_id`/`file_name`/`file_size`/`mime_type`), validated (plain-text only,
+   256 KB / 500-line caps), downloaded via a new token-safe `TelegramClient#download_file` (getFile
+   → file URL, UTF-8 scrubbed, URL never logged), and imported through the new `QuoteImporter`
+   service — one quote per non-blank line, routed through `QuoteCreator`, skipping too-short and
+   duplicate lines, reporting "Imported N (skipped M)". See `spec/services/quote_importer_spec.rb`
+   and `spec/services/bot/import_flow_spec.rb`.
 6. **Tag management**: no `/tags` command; no tag-delete flow (`tag:dely`/`tag:deln` with the
    blast-radius confirmation naming affected schedules, plan §8.5.5).
 7. **`/dnd` + snooze** (plan §9.5): `dnd_weekdays` column exists, wholly unused; delivery card
