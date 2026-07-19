@@ -5,13 +5,17 @@
 class QuoteCreator
   CONTENT_ERROR = "Quotes need to be 3–1000 characters."
 
-  Result = Struct.new(:quote, :error_message) do
+  Result = Struct.new(:quote, :error_message, :limit_reached) do
     def success?
       error_message.nil?
     end
 
     def failure?
       !success?
+    end
+
+    def limit_reached?
+      !!limit_reached
     end
   end
 
@@ -26,15 +30,29 @@ class QuoteCreator
   end
 
   def call
+    if limit_reached?
+      return Result.new(
+        nil,
+        "You've reached the free limit of #{User::FREE_QUOTE_LIMIT} quotes. Delete one to add more.",
+        true
+      )
+    end
+
     quote = @user.quotes.new(content: @content, photo_file_id: @photo_file_id)
     if quote.save
-      Result.new(quote, nil)
+      Result.new(quote, nil, false)
     else
-      Result.new(nil, human_error(quote))
+      Result.new(nil, human_error(quote), false)
     end
   end
 
   private
+
+  # Free-tier cap, enforced here so no capture path (add, state, confirm, photo,
+  # import) can bypass it (plan §9.7/N9).
+  def limit_reached?
+    !@user.premium? && @user.quotes.count >= User::FREE_QUOTE_LIMIT
+  end
 
   def human_error(quote)
     if quote.errors.key?(:content)

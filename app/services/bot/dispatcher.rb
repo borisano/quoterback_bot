@@ -134,6 +134,7 @@ module Bot
       when "/schedules"                    then handle_schedules_command(update, user)
       when "/import"                       then handle_import_command(update, user)
       when "/tags"                         then handle_tags_command(update, user)
+      when "/stats"                        then handle_stats(update, user)
       when "/addimage"                     then handle_addimage_command(update, user, rest)
       when "/cancel"                       then # already handled above
       else
@@ -229,6 +230,9 @@ module Bot
       when /\Aset:tags\z/
         client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
         show_tags_manager(update, user)
+      when /\Aset:stats\z/
+        client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
+        handle_stats(update, user)
       when /\Aset:import\z/
         client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
         handle_import_command(update, user)
@@ -474,7 +478,8 @@ module Bot
 
       result = QuoteCreator.call(user: user, content: text, photo_file_id: entry[:file_id])
       unless result.success?
-        client.send_message(chat_id: update.chat_id, text: "❌ #{result.error_message} Try again, or /cancel.")
+        user.update!(state: nil) if result.limit_reached?
+        reply_creation_failure(update, result, retry_hint: !result.limit_reached?)
         return
       end
 
@@ -508,7 +513,7 @@ module Bot
 
       result = QuoteCreator.call(user: user, content: entry[:caption], photo_file_id: entry[:file_id])
       unless result.success?
-        client.send_message(chat_id: update.chat_id, text: "❌ #{result.error_message}")
+        reply_creation_failure(update, result)
         return
       end
 
@@ -619,6 +624,21 @@ module Bot
       }
     end
 
+    # Replies to a failed QuoteCreator result. A hit free-tier limit isn't a
+    # "try again" — it offers the self-service remedy (delete some) per UX19.
+    def reply_creation_failure(update, result, retry_hint: false)
+      if result.limit_reached?
+        client.send_message(
+          chat_id: update.chat_id,
+          text: "🚫 #{result.error_message}",
+          reply_markup: { inline_keyboard: [ [ { text: "📋 Manage quotes", callback_data: "list:pg:1" } ] ] }
+        )
+      else
+        suffix = retry_hint ? " Try again, or /cancel." : ""
+        client.send_message(chat_id: update.chat_id, text: "❌ #{result.error_message}#{suffix}")
+      end
+    end
+
     def handle_add(update, user, text)
       if text.present?
         result = QuoteCreator.call(user: user, content: text)
@@ -630,7 +650,7 @@ module Bot
             reply_markup: saved_quote_keyboard(result.quote)
           )
         else
-          client.send_message(chat_id: update.chat_id, text: "❌ #{result.error_message}")
+          reply_creation_failure(update, result)
         end
       else
         user.update!(state: "awaiting_quote_text")
@@ -644,8 +664,10 @@ module Bot
     def handle_awaiting_quote_text(update, user, text)
       result = QuoteCreator.call(user: user, content: text)
       unless result.success?
-        # Keep the state so the next message is another attempt (or /cancel).
-        client.send_message(chat_id: update.chat_id, text: "❌ #{result.error_message} Try again, or /cancel.")
+        # A validation error keeps the state so the next message is another attempt;
+        # a hit free-tier limit is terminal, so clear the state.
+        user.update!(state: nil) if result.limit_reached?
+        reply_creation_failure(update, result, retry_hint: !result.limit_reached?)
         return
       end
 
@@ -698,7 +720,7 @@ module Bot
 
       result = QuoteCreator.call(user: user, content: entry[:text])
       unless result.success?
-        client.send_message(chat_id: update.chat_id, text: "❌ #{result.error_message}")
+        reply_creation_failure(update, result)
         return
       end
 
@@ -1060,11 +1082,12 @@ module Bot
 
     def handle_settings(update, user)
       quote_count = user.quotes.count
+      quota = user.premium? ? "#{quote_count}" : "#{quote_count}/#{User::FREE_QUOTE_LIMIT}"
       tz_display = user.timezone.present? ? user.timezone : "not set"
       schedule_count = user.delivery_schedules.where(enabled: true).count
 
       text = "⚙️ Settings\n\n" \
-             "Quotes: #{quote_count} · TZ: #{tz_display} · Schedules: #{schedule_count}"
+             "Quotes: #{quota} · TZ: #{tz_display} · Schedules: #{schedule_count}"
 
       client.send_message(
         chat_id: update.chat_id,
@@ -1099,6 +1122,7 @@ module Bot
              "/settimezone — set your timezone\n\n" \
              "Manage\n" \
              "/tags — manage your tags\n" \
+             "/stats — your collection stats\n" \
              "/settings — your settings & stats\n" \
              "/delete [id] — delete a quote"
 
@@ -1297,6 +1321,40 @@ module Bot
       client.send_message(
         chat_id: update.chat_id,
         text: "🏷 Type the tag name (e.g. stoic, motivation):"
+      )
+    end
+
+    # ── Stats (G9, plan §9.6) ────────────────────────────────────────────────────
+
+    def handle_stats(update, user)
+      s = UserStatsQuery.call(user)
+
+      if s.total_quotes.zero?
+        client.send_message(
+          chat_id: update.chat_id,
+          text: "📊 No stats yet — add your first quote and they'll show up here!",
+          reply_markup: { inline_keyboard: [ [ { text: "✍️ Add a quote", callback_data: "ob:addfirst" } ] ] }
+        )
+        return
+      end
+
+      quota = user.premium? ? "#{s.total_quotes}" : "#{s.total_quotes} / #{User::FREE_QUOTE_LIMIT}"
+      lines = [ "📊 Your stats", "", "Quotes: #{quota}", "Authors: #{s.distinct_authors}", "Favourites: #{s.favourites}" ]
+      lines << "With images: #{s.with_images}" if s.with_images.positive?
+      lines << "Delivered: #{s.quotes_delivered}"
+      lines << "Current streak: #{s.current_streak} day#{'s' unless s.current_streak == 1} 🔥" if s.current_streak.positive?
+      if s.top_tags.any?
+        lines << ""
+        lines << "Top tags: #{s.top_tags.map { |name, count| "##{name} (#{count})" }.join(', ')}"
+      end
+
+      client.send_message(
+        chat_id: update.chat_id,
+        text: lines.join("\n"),
+        reply_markup: { inline_keyboard: [ [
+          { text: "🎲 Get a quote", callback_data: "q:rand:0" },
+          { text: "📋 My quotes", callback_data: "list:pg:1" }
+        ] ] }
       )
     end
 

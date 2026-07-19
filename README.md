@@ -39,7 +39,7 @@ Full research and competitor analysis: [`docs/product_research.md`](docs/product
 - Tags/categories (`#stoic`, `#funny`, `#motivation`) — ✅ shipped (tag picker, `/quote #tag`)
 - Favourite quotes + weighted delivery — ✅ shipped
 - Multiple daily schedules (incl. per-tag schedules) — ✅ shipped (`/schedules`)
-- Quote streaks 🔥 (collected; `/stats` surfacing planned)
+- Quote streaks 🔥 — ✅ shipped (surfaced in `/stats`)
 - Do Not Disturb days
 
 ## Planned V3 / AI Features

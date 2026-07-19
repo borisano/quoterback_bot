@@ -284,10 +284,19 @@ fixer should confirm with the author which are in scope now. Ordered by user imp
 7. **`/dnd` + snooze** (plan §9.5): `dnd_weekdays` column exists, wholly unused; delivery card
    lacks `😴 Snooze today`; delivery card buttons diverge from UX15 (`Delete/Another` instead of
    `Fav/Another/Snooze`) — reconcile when building this.
-8. **Free-tier limit stub** (plan §9.7): `FREE_QUOTE_LIMIT`/`premium?` choke point — build it on
-   the `QuoteCreator` introduced by C3.
-9. **`/stats`** (plan §9.6): streak data is being collected (`streak_count`/`streak_last_date`)
-   but is never shown to anyone.
+8. ✅ IMPLEMENTED — **Free-tier limit stub** (plan §9.7): `User::FREE_QUOTE_LIMIT = 20` and a
+   stub `User#premium?` (always false). Enforced at the single `QuoteCreator` choke point, so
+   every capture path (`/add`, `awaiting_quote_text`, confirm-on-text, confirm-on-photo,
+   photo-then-text, and import) is covered. `QuoteCreator::Result` carries `limit_reached?`; the
+   dispatcher surfaces a non-dead-end "🚫 You've reached the free limit … [📋 Manage quotes]"
+   (UX19) and ends the awaiting-text flow instead of looping. Import naturally stops at the cap
+   and skips the rest. Schedules and images are NOT gated. The `/settings` and `/stats` headers
+   show `N/20`.
+9. ✅ IMPLEMENTED — **`/stats`** (plan §9.6): `/stats` (and the `set:stats` settings button) shows
+   total quotes (with the free-tier quota), distinct authors, favourites, images, deliveries, the
+   current streak 🔥, and the top three tags. Backed by the new scoped `UserStatsQuery`. Empty
+   collections get an encouraging add-your-first nudge. See `spec/queries/user_stats_query_spec.rb`
+   and `spec/services/bot/stats_flow_spec.rb`.
 10. **Typed-id fallback commands** `/tag`, `/untag`, `/fav`, `/unfav` (plan §8.5.3) — plan calls
     them optional power-user fallbacks; lowest priority.
 11. **Minor plan deltas:** `bot:quote_now[chat_id]` rake task ✅ **IMPLEMENTED**. The rest are

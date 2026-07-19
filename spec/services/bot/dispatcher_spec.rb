@@ -1440,9 +1440,9 @@ RSpec.describe Bot::Dispatcher do
     end
   end
 
-  context "with an unimplemented set:* callback" do
+  context "with an unimplemented set:* callback (set:dnd — DND ships with G7)" do
     it "still answers with a coming-soon toast" do
-      dispatcher.dispatch(parsed_update(callback_data: "set:stats", callback_query_id: "ss1"))
+      dispatcher.dispatch(parsed_update(callback_data: "set:dnd", callback_query_id: "ss1"))
       expect(client).to have_received(:answer_callback_query).with(
         hash_including(callback_query_id: "ss1", text: a_string_including("Coming soon"))
       )

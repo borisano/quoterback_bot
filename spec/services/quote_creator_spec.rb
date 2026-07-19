@@ -71,5 +71,28 @@ RSpec.describe QuoteCreator do
         expect { described_class.call(user: user, content: nil) }.not_to raise_error
       end
     end
+
+    context "at the free-tier quote limit (G8, plan §9.7)" do
+      before { create_list(:quote, User::FREE_QUOTE_LIMIT, user: user) }
+
+      it "does not create another quote for a non-premium user" do
+        expect {
+          described_class.call(user: user, content: "One quote over the line")
+        }.not_to change { user.quotes.count }
+      end
+
+      it "returns a limit_reached failure with a self-service message" do
+        result = described_class.call(user: user, content: "One quote over the line")
+        expect(result).to have_attributes(success?: false, limit_reached?: true)
+        expect(result.error_message).to include("free limit").and include("20")
+      end
+
+      it "lets a premium user keep adding" do
+        allow(user).to receive(:premium?).and_return(true)
+        expect {
+          described_class.call(user: user, content: "Premium keeps going")
+        }.to change { user.quotes.count }.by(1)
+      end
+    end
   end
 end

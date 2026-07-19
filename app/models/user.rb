@@ -43,4 +43,14 @@ class User < ApplicationRecord
   def awaiting_state?
     state.present?
   end
+
+  # Free-tier quote-count cap (plan §9.7 — stub, no payments yet). Enforced at the
+  # QuoteCreator choke point so every capture path is covered. Schedules and images
+  # are deliberately NOT gated.
+  FREE_QUOTE_LIMIT = 20
+
+  # Stub until payment integration lands: nobody is premium yet.
+  def premium?
+    false
+  end
 end
