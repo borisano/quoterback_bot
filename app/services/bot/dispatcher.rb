@@ -322,6 +322,9 @@ module Bot
       )
     end
 
+    # A .txt document is unambiguous, so we import it whether or not the user ran
+    # /import first (friendlier than forcing the command). The awaiting_import_file
+    # state still gives a guided entry point and is cleared here on completion.
     def handle_document(update, user)
       doc = update.document
 
@@ -334,6 +337,9 @@ module Bot
         return
       end
 
+      # file_size is optional in Telegram's payload; when present it lets us reject
+      # early, but the real cap is enforced by max_bytes on the streamed download
+      # below (so a metadata-less oversized upload still can't be read wholesale).
       if doc[:file_size].to_i > QuoteImporter::MAX_BYTES
         clear_import_state(user)
         client.send_message(chat_id: update.chat_id, text: "❌ That file is too large — imports are capped at 256 KB.")
@@ -342,7 +348,7 @@ module Bot
 
       content =
         begin
-          client.download_file(doc[:file_id])
+          client.download_file(doc[:file_id], max_bytes: QuoteImporter::MAX_BYTES)
         rescue TelegramClient::Error => e
           Rails.logger.error("[Bot::Dispatcher] import download failed: #{e.message}")
           nil

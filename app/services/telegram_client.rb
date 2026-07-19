@@ -39,26 +39,49 @@ class TelegramClient
     @api.respond_to?(name) || super
   end
 
+  # Timeouts so a hung file server can never block the dispatcher thread forever.
+  DOWNLOAD_OPEN_TIMEOUT = 10
+  DOWNLOAD_READ_TIMEOUT = 30
+
   # Downloads a file's raw contents by file_id: getFile → build the file URL →
   # fetch it. Returns a UTF-8 String (invalid bytes scrubbed) or nil if Telegram
-  # returned no file_path.
-  # ⚠️ The download URL embeds the bot token — it is NEVER logged.
-  def download_file(file_id)
+  # returned no file_path. The body is streamed and aborted once it exceeds
+  # `max_bytes` (when given), so an oversized or metadata-less upload can't be
+  # read wholesale into memory. Network/timeout failures are mapped to Error so
+  # callers only need to rescue TelegramClient::Error.
+  # ⚠️ The download URL embeds the bot token — it is NEVER logged or raised.
+  def download_file(file_id, max_bytes: nil)
     resp = get_file(file_id: file_id)
     file_path = extract_file_path(resp)
     return nil if file_path.nil? || file_path.to_s.empty?
 
     uri = URI.parse("https://api.telegram.org/file/bot#{token}/#{file_path}")
-    response = Net::HTTP.get_response(uri)
-    raise Error, "file download failed (#{response.code})" unless response.is_a?(Net::HTTPSuccess)
-
-    response.body.to_s.encode("UTF-8", invalid: :replace, undef: :replace)
+    fetch_body(uri, max_bytes)
   rescue Telegram::Bot::Exceptions::ResponseError => e
     raise Forbidden, e.message if e.response.status == 403
     raise Error, e.message
   end
 
   private
+
+  def fetch_body(uri, max_bytes)
+    body = +""
+    Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https",
+      open_timeout: DOWNLOAD_OPEN_TIMEOUT, read_timeout: DOWNLOAD_READ_TIMEOUT) do |http|
+      http.request(Net::HTTP::Get.new(uri)) do |response|
+        # Don't interpolate the URI into any message — it carries the bot token.
+        raise Error, "file download failed (#{response.code})" unless response.is_a?(Net::HTTPSuccess)
+
+        response.read_body do |chunk|
+          body << chunk
+          raise Error, "file exceeds #{max_bytes} bytes" if max_bytes && body.bytesize > max_bytes
+        end
+      end
+    end
+    body.encode("UTF-8", invalid: :replace, undef: :replace)
+  rescue SocketError, IOError, SystemCallError, Timeout::Error => e
+    raise Error, "file download failed: #{e.class}"
+  end
 
   # getFile responses vary by gem version (typed object vs Hash); pull file_path
   # out of whichever shape we got.

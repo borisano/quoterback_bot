@@ -40,7 +40,8 @@ RSpec.describe Bot::Dispatcher, "import from a text file (G5)" do
 
   describe "receiving a document" do
     it "downloads a .txt file and imports its lines" do
-      allow(client).to receive(:download_file).with("FID").and_return("First good quote line\nSecond good quote line")
+      allow(client).to receive(:download_file).with("FID", max_bytes: QuoteImporter::MAX_BYTES)
+        .and_return("First good quote line\nSecond good quote line")
       expect {
         dispatcher.dispatch(update(document: doc))
       }.to change { user.quotes.count }.by(2)
@@ -84,6 +85,14 @@ RSpec.describe Bot::Dispatcher, "import from a text file (G5)" do
       dispatcher.dispatch(update(document: doc(file_size: QuoteImporter::MAX_BYTES + 1)))
       expect(client).not_to have_received(:download_file)
       expect(client).to have_received(:send_message).with(hash_including(text: a_string_including("too large")))
+    end
+
+    it "still caps the download when file_size metadata is absent" do
+      # No pre-check possible, so the streamed download enforces the cap and raises.
+      allow(client).to receive(:download_file).with("FID", max_bytes: QuoteImporter::MAX_BYTES)
+        .and_raise(TelegramClient::Error, "file exceeds bytes")
+      dispatcher.dispatch(update(document: doc(file_size: nil)))
+      expect(client).to have_received(:send_message).with(hash_including(text: a_string_including("couldn't read")))
     end
 
     it "tells the user when the file can't be read" do
