@@ -1098,14 +1098,14 @@ module Bot
       show_tags_manager(update, user)
     end
 
-    def show_tags_manager(update, user, edit: false)
-      tags = user.tags
-                 .left_joins(:taggings)
-                 .group("tags.id")
-                 .select("tags.*, COUNT(taggings.id) AS quotes_count")
-                 .order("tags.name")
+    # Two buttons per tag row; keep the total well under Telegram's 100-button
+    # inline-keyboard cap so a user with many tags still gets a usable manager.
+    TAGS_MANAGE_LIMIT = 45
 
-      if tags.empty?
+    def show_tags_manager(update, user, edit: false)
+      total = user.tags.count
+
+      if total.zero?
         send_or_edit(
           update,
           "🏷 You haven't created any tags yet.\n\nOpen any quote and tap 🏷 Tag to start organizing your collection.",
@@ -1115,8 +1115,18 @@ module Bot
         return
       end
 
+      tags = user.tags
+                 .left_joins(:taggings)
+                 .group("tags.id")
+                 .select("tags.*, COUNT(taggings.id) AS quotes_count")
+                 .order("tags.name")
+                 .limit(TAGS_MANAGE_LIMIT)
+                 .to_a
+
       lines = tags.map { |t| "##{t.name} — #{t.quotes_count} quote#{'s' unless t.quotes_count == 1}" }
-      text = "🏷 Your tags\n\n#{lines.join("\n")}"
+      header = "🏷 Your tags"
+      header += " (showing #{TAGS_MANAGE_LIMIT} of #{total})" if total > TAGS_MANAGE_LIMIT
+      text = "#{header}\n\n#{lines.join("\n")}"
 
       keyboard = tags.flat_map do |t|
         [ [
