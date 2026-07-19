@@ -15,17 +15,18 @@ class QuoteCreator
     end
   end
 
-  def self.call(user:, content:)
-    new(user: user, content: content).call
+  def self.call(user:, content:, photo_file_id: nil)
+    new(user: user, content: content, photo_file_id: photo_file_id).call
   end
 
-  def initialize(user:, content:)
+  def initialize(user:, content:, photo_file_id: nil)
     @user = user
     @content = content.to_s.strip
+    @photo_file_id = photo_file_id.presence
   end
 
   def call
-    quote = @user.quotes.new(content: @content)
+    quote = @user.quotes.new(content: @content, photo_file_id: @photo_file_id)
     if quote.save
       Result.new(quote, nil)
     else

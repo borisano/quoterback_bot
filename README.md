@@ -31,6 +31,8 @@ Full research and competitor analysis: [`docs/product_research.md`](docs/product
 - `/timezones` — list common timezones with their current times
 - Inline "Give me a quote" button on bot home screen
 - Import quotes from a text file (one per line)
+- Attach a photo to a quote — send a photo (with or without a caption), or tap 📷 on any quote;
+  delivered back as an image with the quote as caption
 
 ## Planned V2 Features
 

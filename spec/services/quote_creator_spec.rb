@@ -23,6 +23,16 @@ RSpec.describe QuoteCreator do
         result = described_class.call(user: user, content: "  padded quote  ")
         expect(result.quote.content).to eq("padded quote")
       end
+
+      it "stores an optional photo_file_id (G4)" do
+        result = described_class.call(user: user, content: "A quote with a picture", photo_file_id: "FID123")
+        expect(result.quote.photo_file_id).to eq("FID123")
+      end
+
+      it "leaves photo_file_id nil when not supplied" do
+        result = described_class.call(user: user, content: "A plain quote here")
+        expect(result.quote.photo_file_id).to be_nil
+      end
     end
 
     context "with content that is too short" do

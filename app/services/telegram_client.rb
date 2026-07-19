@@ -50,13 +50,13 @@ class TelegramClient
   # read wholesale into memory. Network/timeout failures are mapped to Error so
   # callers only need to rescue TelegramClient::Error.
   # ⚠️ The download URL embeds the bot token — it is NEVER logged or raised.
-  def download_file(file_id, max_bytes: nil)
+  def download_file(file_id, max_bytes: nil, binary: false)
     resp = get_file(file_id: file_id)
     file_path = extract_file_path(resp)
     return nil if file_path.nil? || file_path.to_s.empty?
 
     uri = URI.parse("https://api.telegram.org/file/bot#{token}/#{file_path}")
-    fetch_body(uri, max_bytes)
+    fetch_body(uri, max_bytes, binary: binary)
   rescue Telegram::Bot::Exceptions::ResponseError => e
     raise Forbidden, e.message if e.response.status == 403
     raise Error, e.message
@@ -67,8 +67,8 @@ class TelegramClient
 
   private
 
-  def fetch_body(uri, max_bytes)
-    body = +""
+  def fetch_body(uri, max_bytes, binary: false)
+    body = "".b
     Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https",
       open_timeout: DOWNLOAD_OPEN_TIMEOUT, read_timeout: DOWNLOAD_READ_TIMEOUT) do |http|
       http.request(Net::HTTP::Get.new(uri)) do |response|
@@ -81,7 +81,8 @@ class TelegramClient
         end
       end
     end
-    body.encode("UTF-8", invalid: :replace, undef: :replace)
+    # Binary (e.g. images) is returned raw; text is scrubbed to valid UTF-8.
+    binary ? body : body.encode("UTF-8", invalid: :replace, undef: :replace)
   rescue SocketError, IOError, SystemCallError, Timeout::Error => e
     raise Error, "file download failed: #{e.class}"
   end

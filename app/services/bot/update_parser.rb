@@ -4,13 +4,16 @@ module Bot
   # the webhook controller (ActionController::Parameters / plain Hash).
   class UpdateParser
     # `document` is a Hash ({ file_id:, file_name:, file_size:, mime_type: }) when
-    # the message carries an uploaded file, else nil. It defaults to nil so every
-    # existing constructor (and spec) that omits it keeps working.
+    # the message carries an uploaded file, else nil. `photo_file_id` is the
+    # largest PhotoSize's file_id when the message carries a photo, and `caption`
+    # is the photo/document caption. All three default to nil so every existing
+    # constructor (and spec) that omits them keeps working.
     ParsedUpdate = Data.define(
-      :chat_id, :from_id, :first_name, :language_code, :text, :callback_data, :callback_query_id, :message_id, :document
+      :chat_id, :from_id, :first_name, :language_code, :text, :callback_data, :callback_query_id, :message_id,
+      :document, :photo_file_id, :caption
     ) do
-      def initialize(document: nil, **rest)
-        super(document: document, **rest)
+      def initialize(document: nil, photo_file_id: nil, caption: nil, **rest)
+        super(document: document, photo_file_id: photo_file_id, caption: caption, **rest)
       end
     end
 
@@ -58,7 +61,9 @@ module Bot
         callback_data:     nil,
         callback_query_id: nil,
         message_id:        get(msg, :message_id),
-        document:          parse_document(msg)
+        document:          parse_document(msg),
+        photo_file_id:     parse_photo(msg),
+        caption:           get(msg, :caption)
       )
     end
 
@@ -72,6 +77,16 @@ module Bot
         file_size: get(doc, :file_size),
         mime_type: get(doc, :mime_type)
       }
+    end
+
+    # Telegram sends a photo as an array of increasing-resolution PhotoSizes.
+    # Always take the largest (plan §6.6) — the first is a tiny thumbnail.
+    def parse_photo(msg)
+      photos = get(msg, :photo)
+      return nil if photos.blank?
+
+      largest = photos.max_by { |p| get(p, :file_size).to_i }
+      get(largest, :file_id)
     end
 
     # Handles telegram-bot-ruby typed objects (respond to method names),

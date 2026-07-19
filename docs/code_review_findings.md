@@ -252,10 +252,20 @@ fixer should confirm with the author which are in scope now. Ordered by user imp
 3. ✅ IMPLEMENTED — **`q:bytag` is a dead path**: the callback handler exists (dispatcher.rb:125) but **nothing
    ever renders a `q:bytag` button** (plan §9.1: bare `/quote` should offer a top-tags row).
    Either render the row or note the handler is forward-wiring.
-4. **Images** (plan §6.6): no photo/document extraction in `UpdateParser`, no confirm-on-photo,
-   no `AttachQuoteImageJob`, no `send_photo` delivery/caption/fallback. Schema (`photo_file_id`,
-   Active Storage tables) is ready. Also `production.rb` has `active_storage.service = :local`
-   (plan says `:amazon`) and `.env.example` lacks the AWS vars — both part of this work item.
+4. ✅ IMPLEMENTED — **Images** (plan §6.6): `UpdateParser` extracts the largest PhotoSize's
+   `file_id` + caption. Three capture flows: photo+caption → confirm-on-photo (`pc:yes`/`pc:no`);
+   photo-no-caption → `awaiting_quote_text_for_photo` then the next text becomes the content;
+   `q:img:<id>` (on the saved-quote and detail cards) → `awaiting_image_for_quote` attaches the
+   next photo to an existing quote. Every path stores `photo_file_id` immediately and enqueues
+   `AttachQuoteImageJob`, which downloads the file (binary, 20 MB cap, token-safe) and attaches a
+   durable Active Storage copy (idempotent). Delivery goes through the new `Bot::QuoteMessenger`
+   (used by `/quote`, "Another", and `DeliverQuoteJob`): `send_photo` with the quote as caption;
+   if the text exceeds the 1024-char caption cap it sends a truncated caption then the full text;
+   if `send_photo` fails on a stale `file_id` it re-uploads the durable copy as a multipart file
+   (capturing the fresh `file_id`) or falls back to text-only — delivery never hard-fails.
+   `production.rb` now uses `active_storage.service = :amazon` and `.env.example` documents the AWS
+   vars. See `spec/services/bot/{image_flow,quote_messenger}_spec.rb` and
+   `spec/jobs/attach_quote_image_job_spec.rb`.
 5. ✅ IMPLEMENTED — **`/import`** (plan §6.4): `/import` (and the `set:import` settings button)
    sets `awaiting_import_file` and prompts for a `.txt` file. A `document` upload is now extracted
    by `UpdateParser` (`file_id`/`file_name`/`file_size`/`mime_type`), validated (plain-text only,

@@ -34,6 +34,8 @@ module Bot
         handle_callback(update, user)
       elsif update.text.present?
         handle_text(update, user)
+      elsif update.photo_file_id
+        handle_photo(update, user)
       elsif update.document
         handle_document(update, user)
       else
@@ -104,6 +106,8 @@ module Bot
         return handle_awaiting_timezone_input(update, user, text) unless text.start_with?("/")
       when "awaiting_quote_text"
         return handle_awaiting_quote_text(update, user, text) unless text.start_with?("/")
+      when "awaiting_quote_text_for_photo"
+        return handle_awaiting_quote_text_for_photo(update, user, text) unless text.start_with?("/")
       when "awaiting_tag_name"
         return handle_awaiting_tag_name(update, user, text) unless text.start_with?("/")
       end
@@ -158,6 +162,12 @@ module Bot
         handle_quote_confirm_yes(update, user, $1)
       when /\Aqc:no:(.+)\z/
         handle_quote_confirm_no(update, user, $1)
+      when /\Apc:yes:(.+)\z/
+        handle_photo_confirm_yes(update, user, $1)
+      when /\Apc:no:(.+)\z/
+        handle_photo_confirm_no(update, user, $1)
+      when /\Aq:img:(\d+)\z/
+        handle_quote_image_request(update, user, $1.to_i)
       when /\Aq:rand:(\d+)\z/
         handle_quote_random_callback(update, user, $1.to_i)
       when /\Aq:show:(\d+)(?::(\d+))?(?::(\d+))?\z/
@@ -313,13 +323,13 @@ module Bot
       )
     end
 
-    # A message with no text (photo, document, sticker, voice, …). Until image
-    # capture and import land, tell the user what we accept rather than going
+    # A message we don't handle (sticker, voice, video, …). Text, photos, and .txt
+    # files are handled elsewhere; tell the user what we accept rather than going
     # silent (M13).
     def handle_unsupported_message(update)
       client.send_message(
         chat_id: update.chat_id,
-        text: "📝 I can only save text quotes right now — send me the text and I'll save it!"
+        text: "📝 Send me text or a photo to save a quote — or a .txt file to import many at once."
       )
     end
 
@@ -352,7 +362,7 @@ module Bot
       # A document interrupts any text-capture flow; drop that state (and its cache)
       # so the user's next message isn't mis-consumed as a tag name or quote (Fable
       # review #8).
-      if %w[awaiting_tag_name awaiting_quote_text].include?(user.state)
+      if %w[awaiting_tag_name awaiting_quote_text awaiting_quote_text_for_photo].include?(user.state)
         user.update!(state: nil)
         Rails.cache.delete("pending_tag_quote:#{update.chat_id}")
       end
@@ -406,6 +416,155 @@ module Bot
       )
     end
 
+    # ── Image attachments (G4, plan §6.6) ────────────────────────────────────────
+
+    def handle_photo(update, user)
+      file_id = update.photo_file_id
+
+      # Attaching a photo to an existing quote (via q:img / awaiting_image_for_quote).
+      if user.state == "awaiting_image_for_quote"
+        return attach_photo_to_pending_quote(update, user, file_id)
+      end
+
+      caption = update.caption.to_s.strip
+
+      if caption.present?
+        # Photo + caption: confirm like confirm-on-text, but for a photo.
+        token = SecureRandom.hex(8)
+        Rails.cache.write(
+          "pending_photo_quote:#{token}",
+          { from_id: update.from_id, chat_id: update.chat_id, file_id: file_id, caption: caption },
+          expires_in: 10.minutes
+        )
+        client.send_message(
+          chat_id: update.chat_id,
+          text: "🖼 Add this as a quote with the image?\n\n\"#{caption.truncate(300)}\"",
+          reply_markup: { inline_keyboard: [ [
+            { text: "✅ Add as quote", callback_data: "pc:yes:#{token}" },
+            { text: "❌ Not a quote", callback_data: "pc:no:#{token}" }
+          ] ] }
+        )
+      else
+        # Photo, no caption: stash the file_id and ask for the quote text.
+        Rails.cache.write(
+          "pending_photo:#{update.chat_id}",
+          { from_id: update.from_id, file_id: file_id },
+          expires_in: 10.minutes
+        )
+        user.update!(state: "awaiting_quote_text_for_photo")
+        client.send_message(
+          chat_id: update.chat_id,
+          text: "📷 Nice image! Now send me the quote text to go with it."
+        )
+      end
+    end
+
+    def handle_awaiting_quote_text_for_photo(update, user, text)
+      entry = Rails.cache.read("pending_photo:#{update.chat_id}")
+      unless entry
+        user.update!(state: nil)
+        client.send_message(chat_id: update.chat_id, text: "⏰ That image expired — please send it again.")
+        return
+      end
+
+      result = QuoteCreator.call(user: user, content: text, photo_file_id: entry[:file_id])
+      unless result.success?
+        client.send_message(chat_id: update.chat_id, text: "❌ #{result.error_message} Try again, or /cancel.")
+        return
+      end
+
+      user.update!(state: nil)
+      Rails.cache.delete("pending_photo:#{update.chat_id}")
+      AttachQuoteImageJob.perform_later(result.quote.id)
+
+      count = user.quotes.count
+      client.send_message(
+        chat_id: update.chat_id,
+        text: "✅ Saved with your image (quote #{count} in your collection)",
+        reply_markup: saved_quote_keyboard(result.quote)
+      )
+    end
+
+    def handle_photo_confirm_yes(update, user, token)
+      entry = Rails.cache.read("pending_photo_quote:#{token}")
+
+      if entry.nil?
+        client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
+        client.send_message(chat_id: update.chat_id, text: "⏰ That image expired — please send it again.")
+        return
+      end
+
+      unless entry[:from_id] == update.from_id
+        client.answer_callback_query(callback_query_id: update.callback_query_id, text: "This isn't your quote confirmation.")
+        return
+      end
+
+      client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
+
+      result = QuoteCreator.call(user: user, content: entry[:caption], photo_file_id: entry[:file_id])
+      unless result.success?
+        client.send_message(chat_id: update.chat_id, text: "❌ #{result.error_message}")
+        return
+      end
+
+      Rails.cache.delete("pending_photo_quote:#{token}")
+      AttachQuoteImageJob.perform_later(result.quote.id)
+
+      count = user.quotes.count
+      client.edit_message_text(
+        chat_id: update.chat_id,
+        message_id: update.message_id,
+        text: "✅ Saved with your image (quote #{count} in your collection)",
+        reply_markup: saved_quote_keyboard(result.quote)
+      )
+    end
+
+    def handle_photo_confirm_no(update, user, token)
+      entry = Rails.cache.read("pending_photo_quote:#{token}")
+      if entry && entry[:from_id] != update.from_id
+        client.answer_callback_query(callback_query_id: update.callback_query_id, text: "This isn't your quote confirmation.")
+        return
+      end
+
+      Rails.cache.delete("pending_photo_quote:#{token}")
+      client.answer_callback_query(callback_query_id: update.callback_query_id, text: "👍 Dismissed")
+    end
+
+    def handle_quote_image_request(update, user, quote_id)
+      quote = user.quotes.find_by(id: quote_id)
+      unless quote
+        client.answer_callback_query(callback_query_id: update.callback_query_id, text: "That quote's no longer here")
+        return
+      end
+
+      client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
+      Rails.cache.write("pending_image_quote:#{update.chat_id}", quote.id, expires_in: 10.minutes)
+      user.update!(state: "awaiting_image_for_quote")
+      client.send_message(chat_id: update.chat_id, text: "📷 Send me a photo to attach to this quote.")
+    end
+
+    def attach_photo_to_pending_quote(update, user, file_id)
+      quote_id = Rails.cache.read("pending_image_quote:#{update.chat_id}")
+      quote = quote_id && user.quotes.find_by(id: quote_id)
+
+      unless quote
+        user.update!(state: nil)
+        client.send_message(chat_id: update.chat_id, text: "🤷 That quote's no longer here.")
+        return
+      end
+
+      quote.update!(photo_file_id: file_id)
+      user.update!(state: nil)
+      Rails.cache.delete("pending_image_quote:#{update.chat_id}")
+      AttachQuoteImageJob.perform_later(quote.id)
+
+      client.send_message(
+        chat_id: update.chat_id,
+        text: "✅ Image attached!",
+        reply_markup: saved_quote_keyboard(quote)
+      )
+    end
+
     def import_text_file?(doc)
       return false if doc.nil?
 
@@ -426,6 +585,7 @@ module Bot
           [
             { text: "🏷 Tag", callback_data: "q:tag:#{quote.id}" },
             { text: "❤️ Fav", callback_data: "fav:toggle:#{quote.id}" },
+            { text: "📷 Image", callback_data: "q:img:#{quote.id}" },
             { text: "🗑 Delete", callback_data: "q:del:#{quote.id}" }
           ],
           [
@@ -602,13 +762,18 @@ module Bot
         keyboard << tag_row if tag_row.any?
       end
 
-      presenter = Bot::QuotePresenter.new(quote)
-      client.send_message(
+      Bot::QuoteMessenger.send_quote(
+        client: client,
         chat_id: update.chat_id,
-        text: presenter.message_text,
+        quote: quote,
         reply_markup: { inline_keyboard: keyboard }
       )
 
+      record_on_demand_delivery(user, quote)
+    end
+
+    # Logs a /quote or "Another" tap and bumps the quote's delivery counters.
+    def record_on_demand_delivery(user, quote)
       user.quote_deliveries.create!(
         quote: quote,
         local_date: local_date_for(user),
@@ -645,29 +810,31 @@ module Bot
       end
 
       client.answer_callback_query(callback_query_id: update.callback_query_id, text: "")
-      presenter = Bot::QuotePresenter.new(quote)
-      client.edit_message_text(
-        chat_id: update.chat_id,
-        message_id: update.message_id,
-        text: presenter.message_text,
-        reply_markup: {
-          inline_keyboard: [ [
-            { text: "🏷 Tag", callback_data: "q:tag:#{quote.id}" },
-            { text: "❤️ Fav", callback_data: "fav:toggle:#{quote.id}" },
-            { text: "🗑 Delete", callback_data: "q:del:#{quote.id}" }
-          ], [
-            { text: "🎲 Another", callback_data: "q:rand:0" }
-          ] ]
-        }
-      )
+      keyboard = {
+        inline_keyboard: [ [
+          { text: "🏷 Tag", callback_data: "q:tag:#{quote.id}" },
+          { text: "❤️ Fav", callback_data: "fav:toggle:#{quote.id}" },
+          { text: "🗑 Delete", callback_data: "q:del:#{quote.id}" }
+        ], [
+          { text: "🎲 Another", callback_data: "q:rand:0" }
+        ] ]
+      }
 
-      user.quote_deliveries.create!(
-        quote: quote,
-        local_date: local_date_for(user),
-        context: "on_demand",
-        delivered_at: Time.current
-      )
-      quote.update!(times_delivered: quote.times_delivered + 1, last_delivered_at: Time.current)
+      if quote.photo_file_id.present?
+        # A text message can't be edited into a photo, so send the next quote as a
+        # fresh message when it carries an image.
+        Bot::QuoteMessenger.send_quote(client: client, chat_id: update.chat_id, quote: quote, reply_markup: keyboard)
+      else
+        presenter = Bot::QuotePresenter.new(quote)
+        client.edit_message_text(
+          chat_id: update.chat_id,
+          message_id: update.message_id,
+          text: presenter.message_text,
+          reply_markup: keyboard
+        )
+      end
+
+      record_on_demand_delivery(user, quote)
     end
 
     def handle_quote_show(update, user, quote_id, page: 1, tag_id: nil)
@@ -695,6 +862,7 @@ module Bot
           inline_keyboard: [ [
             { text: "🏷 Tag", callback_data: "q:tag:#{quote.id}" },
             { text: "❤️ Fav", callback_data: "fav:toggle:#{quote.id}" },
+            { text: "📷 Image", callback_data: "q:img:#{quote.id}" },
             { text: "🗑 Delete", callback_data: "q:del:#{quote.id}" }
           ], [
             { text: "🔙 Back to list", callback_data: back_target }
@@ -890,6 +1058,7 @@ module Bot
       text = "📖 QuoterBack Help\n\n" \
              "Capture\n" \
              "Just send me any text → I'll ask if it's a quote\n" \
+             "Send a photo (with or without a caption) to save an image quote\n" \
              "/add — add a quote\n" \
              "/import — bulk-add from a .txt file\n\n" \
              "Browse\n" \

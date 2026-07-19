@@ -27,10 +27,10 @@ class DeliverQuoteJob < ApplicationJob
     # The Telegram send is intentionally OUTSIDE any rescue so TelegramClient::Error
     # propagates up to retry_on, and TelegramClient::Forbidden is caught below.
     if quote
-      presenter = Bot::QuotePresenter.new(quote)
-      TelegramClient.from_env.send_message(
+      Bot::QuoteMessenger.send_quote(
+        client: TelegramClient.from_env,
         chat_id: user.telegram_chat_id,
-        text: presenter.message_text,
+        quote: quote,
         reply_markup: {
           inline_keyboard: [[
             { text: "🗑 Delete", callback_data: "q:del:#{quote.id}" },
