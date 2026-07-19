@@ -106,6 +106,44 @@ RSpec.describe Bot::Dispatcher, "schedule builder + manager (G1)" do
       expect(client).to have_received(:send_message).with(hash_including(text: a_string_including("expired")))
     end
 
+    it "keeps the builder alive on a crafted out-of-range hour (sched:h:24)" do
+      dispatcher.dispatch(update(text: "/schedule"))
+      dispatcher.dispatch(update(callback_data: "sched:tag:any", callback_query_id: "c1"))
+      dispatcher.dispatch(update(callback_data: "sched:h:24", callback_query_id: "c2"))
+      expect(client).to have_received(:answer_callback_query).with(hash_including(text: a_string_including("0–23")))
+      # The builder survives, so a valid hour then continues normally.
+      dispatcher.dispatch(update(callback_data: "sched:h:9", callback_query_id: "c3"))
+      dispatcher.dispatch(update(callback_data: "sched:m:0", callback_query_id: "c4"))
+      expect {
+        dispatcher.dispatch(update(callback_data: "sched:create", callback_query_id: "c5"))
+      }.to change { user.delivery_schedules.count }.by(1)
+    end
+
+    it "re-opens the scope chooser if the chosen tag was deleted before Create" do
+      tag = create(:tag, user: user, name: "stoic")
+      dispatcher.dispatch(update(text: "/schedule"))
+      dispatcher.dispatch(update(callback_data: "sched:tag:#{tag.id}", callback_query_id: "c1"))
+      dispatcher.dispatch(update(callback_data: "sched:h:9", callback_query_id: "c2"))
+      dispatcher.dispatch(update(callback_data: "sched:m:0", callback_query_id: "c3"))
+      tag.destroy
+      expect {
+        dispatcher.dispatch(update(callback_data: "sched:create", callback_query_id: "c4"))
+      }.not_to change { user.delivery_schedules.count }
+      expect(client).to have_received(:answer_callback_query).with(hash_including(text: a_string_including("removed")))
+    end
+
+    it "does not stack an identical whole-collection schedule" do
+      create(:delivery_schedule, user: user, hour: 9, minute: 0, tag: nil)
+      dispatcher.dispatch(update(text: "/schedule"))
+      dispatcher.dispatch(update(callback_data: "sched:tag:any", callback_query_id: "c1"))
+      dispatcher.dispatch(update(callback_data: "sched:h:9", callback_query_id: "c2"))
+      dispatcher.dispatch(update(callback_data: "sched:m:0", callback_query_id: "c3"))
+      expect {
+        dispatcher.dispatch(update(callback_data: "sched:create", callback_query_id: "c4"))
+      }.not_to change { user.delivery_schedules.count }
+      expect(client).to have_received(:answer_callback_query).with(hash_including(text: a_string_including("already")))
+    end
+
     it "cancels cleanly and clears state" do
       dispatcher.dispatch(update(text: "/schedule"))
       dispatcher.dispatch(update(callback_data: "sched:cancel", callback_query_id: "c1"))
@@ -135,6 +173,14 @@ RSpec.describe Bot::Dispatcher, "schedule builder + manager (G1)" do
     it "rejects an out-of-range time" do
       dispatcher.dispatch(update(text: "/schedule 25:00"))
       expect(client).to have_received(:send_message).with(hash_including(text: a_string_including("Invalid")))
+    end
+
+    it "does not create a duplicate when the same time is typed twice" do
+      dispatcher.dispatch(update(text: "/schedule 09:00"))
+      expect {
+        dispatcher.dispatch(update(text: "/schedule 09:00"))
+      }.not_to change { user.delivery_schedules.count }
+      expect(client).to have_received(:send_message).with(hash_including(text: a_string_including("already have")))
     end
   end
 
@@ -235,6 +281,18 @@ RSpec.describe Bot::Dispatcher, "schedule builder + manager (G1)" do
         }.not_to change { user.delivery_schedules.count }
 
         expect(schedule.reload).to have_attributes(hour: 20, minute: 15)
+      end
+
+      it "reports the row is gone if the edited schedule was deleted before Create" do
+        dispatcher.dispatch(update(callback_data: "sched:edit:#{schedule.id}", callback_query_id: "c1"))
+        dispatcher.dispatch(update(callback_data: "sched:tag:any", callback_query_id: "c2"))
+        dispatcher.dispatch(update(callback_data: "sched:h:20", callback_query_id: "c3"))
+        dispatcher.dispatch(update(callback_data: "sched:m:15", callback_query_id: "c4"))
+        schedule.destroy
+        expect {
+          dispatcher.dispatch(update(callback_data: "sched:create", callback_query_id: "c5"))
+        }.not_to change { user.delivery_schedules.count }
+        expect(client).to have_received(:answer_callback_query).with(hash_including(text: a_string_including("gone")))
       end
     end
 

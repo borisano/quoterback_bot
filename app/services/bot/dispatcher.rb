@@ -1090,6 +1090,15 @@ module Bot
         return
       end
 
+      if duplicate_schedule(user, hour, minute, nil)
+        client.send_message(
+          chat_id: update.chat_id,
+          text: "📅 You already have a daily delivery at #{format('%02d:%02d', hour, minute)} · Any. Manage it in /schedules.",
+          reply_markup: { inline_keyboard: [ [ { text: "📅 My schedules", callback_data: "set:sched" } ] ] }
+        )
+        return
+      end
+
       schedule = user.delivery_schedules.create!(hour: hour, minute: minute, enabled: true)
       QuoteScheduler.schedule_for(schedule)
 
@@ -1179,7 +1188,12 @@ module Bot
     def handle_schedule_pick_hour(update, user, hour)
       builder = read_sched_builder(update)
       return builder_expired(update) if builder.blank?
-      return builder_expired(update) unless (0..23).cover?(hour)
+      # A crafted callback (sched:h:24…99) is a bad value, not an expiry — keep
+      # the in-progress builder and just re-show the grid.
+      unless (0..23).cover?(hour)
+        client.answer_callback_query(callback_query_id: update.callback_query_id, text: "Pick an hour 0–23")
+        return show_schedule_hour_grid(update)
+      end
 
       builder[:hour] = hour
       write_sched_builder(update, builder)
@@ -1197,7 +1211,10 @@ module Bot
       builder = read_sched_builder(update)
       return builder_expired(update) if builder.blank?
       return builder_expired(update) if builder[:hour].nil?
-      return builder_expired(update) unless (0..59).cover?(minute)
+      unless (0..59).cover?(minute)
+        client.answer_callback_query(callback_query_id: update.callback_query_id, text: "Pick a valid minute")
+        return show_schedule_minute_chooser(update)
+      end
 
       builder[:minute] = minute
       write_sched_builder(update, builder)
@@ -1231,14 +1248,39 @@ module Bot
 
       hour   = builder[:hour]
       minute = builder[:minute].to_i
-      tag    = builder[:tag_id] ? user.tags.find_by(id: builder[:tag_id]) : nil
 
-      schedule =
-        if builder[:edit_id]
-          user.delivery_schedules.find_by(id: builder[:edit_id]) || user.delivery_schedules.new
-        else
-          user.delivery_schedules.new
+      # The edit target may have been deleted (e.g. its tag was removed) while the
+      # builder was open — report it rather than silently creating a new row.
+      if builder[:edit_id]
+        schedule = user.delivery_schedules.find_by(id: builder[:edit_id])
+        unless schedule
+          clear_sched_builder(update)
+          client.answer_callback_query(callback_query_id: update.callback_query_id, text: "That schedule is gone")
+          return show_schedules_manager(update, user, edit: true)
         end
+      else
+        schedule = user.delivery_schedules.new
+      end
+
+      # The chosen tag may have been deleted mid-flow — re-open the scope chooser
+      # rather than silently downgrading the schedule to the whole collection.
+      if builder[:tag_id]
+        tag = user.tags.find_by(id: builder[:tag_id])
+        unless tag
+          client.answer_callback_query(callback_query_id: update.callback_query_id, text: "That tag was removed")
+          return show_schedule_tag_chooser(update, user, edit: true)
+        end
+      else
+        tag = nil
+      end
+
+      # Don't stack an identical delivery (same time + scope) — it would fire the
+      # same quote twice a day. Reusing the manager makes the existing one obvious.
+      if duplicate_schedule(user, hour, minute, tag&.id, except_id: schedule.id)
+        clear_sched_builder(update)
+        client.answer_callback_query(callback_query_id: update.callback_query_id, text: "You already have that delivery")
+        return show_schedules_manager(update, user, edit: true)
+      end
 
       schedule.assign_attributes(hour: hour, minute: minute, tag: tag, enabled: true)
       schedule.save!
@@ -1375,6 +1417,14 @@ module Bot
     end
 
     # ── Scheduling helpers ───────────────────────────────────────────────────────
+
+    # Finds an existing schedule with the same time + scope, so we never stack two
+    # identical daily deliveries. `except_id` skips the row being edited.
+    def duplicate_schedule(user, hour, minute, tag_id, except_id: nil)
+      scope = user.delivery_schedules.where(hour: hour, minute: minute, tag_id: tag_id)
+      scope = scope.where.not(id: except_id) if except_id
+      scope.exists?
+    end
 
     def schedule_label(schedule)
       time  = format("%02d:%02d", schedule.hour, schedule.minute)
